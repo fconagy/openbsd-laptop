@@ -1,0 +1,16 @@
+site_name: Docs
+nav:
+  - Home: index.md
+  - Build: openbsd-laptop-build.md
+theme:
+  name: terminal
+  palette: dark2
+  features:
+# To provide more space.
+#    - navigation.top.hide
+#    - navigation.side.hide
+markdown_extensions:
+  - toc:
+      baselevel: "3"
+      toc_depth: "2-4"
+
