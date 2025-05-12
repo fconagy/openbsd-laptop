@@ -881,6 +881,7 @@ _Use this._ In
     /usr/src/sys/sys/conf.h
 
 after '#define cdev_dt_init' add
+
     /* !!!! Added. */
     /* open, close, read, write, ioctl */
     #define cdev_mixrng_init(c,n) { \
