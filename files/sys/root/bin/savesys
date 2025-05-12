@@ -1,0 +1,1093 @@
+#!/bin/sh
+
+# Save system file(s).
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Flag files to signal failure.
+BAILOUT=savesys.bailout.tmp
+BAILOUT2=savesys.bailout2.tmp
+rm -f $BAILOUT $BAILOUT2
+
+# Saved file list name.
+SAVELISTNAME=savesys.list
+
+# More flag files.
+XC=savesys.exclude.flag
+rm -f $XC
+
+# Print help.
+case $1 in
+-h|--help|-help)
+
+	cat <<!EOF
+This script will save system files under a directory tree
+hierarchy which is just like the system tree.
+Usage:
+    savesys [-v][-c][-l|-u|-d dir|-m][-I file][-i][-o][-f][-X file][-x] [file|directory]
+where
+    file        is the absolute pathname of the file to
+                be saved. Don't use it with -m or -I.
+    directory   can also be specified, will save the whole
+                directory tree.
+    -v          verbose.
+    -c          Check, only prints actions like with verbose.
+    -l          Lists files under the save directory tree.
+    -u          Updates a list file which contains attributes for all files.
+                It can be used to restore file attributes to the original.
+                Files coming from git got no attributes, sort of.
+                You can use script setprot to set the protections for files
+                in the save directory accordingly to the list file.
+    -d dir      Use a different save directory for the tree.
+                Either an absolute path or otherwise it will be interpreded
+                as relative to the home directory.
+                Will not create the save directory automatically.
+    -m          Use the list of mod-ded file names and save all of
+                them as they are in current state.
+                Switch -d needs to be also specified.
+    -M          report files which are present in the save directory tree but
+                missing from the system.
+    -I file     Use a list of file names to be saved.
+                A file with lines specifying files or directories, one per line.
+                Pathnames should be absolute.
+                Can have stars in the path names as wildcards.
+                Will use \$HOME/savesys.inc if exists.
+    -i          Ignore the default savesys.inc if there is one.
+    -o          Overwrite saved file if the original is newer,
+                even when there is a saved copy.
+    -f          Force, overwrite saved file no matter what. Be careful using
+                this switch.
+    -X file     Exclude file list. Contains patterns for files/directories to
+                be excluded. The pattern would be matched against the full absolute
+                file name, from line start to line end.
+                Will use \$HOME/savesys.exc if exists.
+    -x          Ignore the default savesys.exc if there is one.
+    -M          List files saved but missing from the system.
+The default save directory root is $HOME/save/<hostname>/sys.
+The default include and exclude files are picked up from \$HOME.
+It will be created when -d is not specified. Otherwise is has to be created
+manually.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Clean up.
+
+cleanup() {
+	rm -f $BAILOUT $BAILOUT2
+	rm -f $XC
+}
+
+# Set up trap.
+trap 'echo "Canceled, cleaning up"; cleanup; exit 1' 1 2 3 15
+
+# Debug.
+#E="echo"
+E=""
+
+# Hostname.
+HN="`hostname | sed 's/\..*$//'`"
+if [ "$HN" = "" ]
+then
+	echo "No host name - confused"
+	exit $FAILURE
+fi
+
+# Deal with the options.
+CHECK=no
+LIST=no
+UPDATE=no
+DIRNAME=""
+MOD=no
+OV=no
+FORCE=no
+VERBOSE=no
+FILELIST=""
+EXCLUDE=""
+SWITCHES=""
+IGNOREI=no
+IGNOREX=no
+MISSING=no
+REMOVE=no
+while [ "$1" != "" ]
+do
+	case "$1" in
+	-c|--check|-check|check)
+
+		# Check.
+		shift
+		CHECK=yes
+		VERBOSE=yes
+		SWITCHES="$SWITCHES -c"
+		;;
+	-l|--list|-list|list)
+
+		# List files.
+		shift
+		LIST=yes
+		SWITCHES="$SWITCHES -l"
+		;;
+	-u|--update|-update|update)
+
+		# Update file attributes list.
+		shift
+		UPDATE=yes
+		SWITCHES="$SWITCHES -u"
+		;;
+	-d|--dir|-dir|dir)
+
+		# Specify save root directory.
+		shift
+		if [ "$1" = "" ]
+		then
+			echo "Specify directory"
+			exit $FAILURE
+		fi
+		DIRNAME="$1"
+		case $DIRNAME in
+		/*)
+
+			# Absolute.
+			DIRECTORY="$DIRNAME"
+			;;
+		*)
+
+			# Interpreted as relative to home directory.
+			DIRECTORY="$HOME/$DIRNAME"
+			;;
+		esac
+		if [ ! -d $DIRECTORY ]
+		then
+			echo "Cannot find $DIRECTORY"
+			echo "Create $DIRECTORY and $DIRECTORY/sys manually"
+			exit $FAILURE
+		fi
+		if [ ! -d $DIRECTORY/sys ]
+		then
+			echo "Directory $DIRECTORY does not look like a save directory"
+			echo "Create $DIRECTORY/sys manually"
+			exit $FAILURE
+		fi
+		shift
+		SWITCHES="$SWITCHES -d $DIRNAME"
+		;;
+	-m|--mod|-mod|mod)
+		shift
+		MOD=yes
+		SWITCHES="$SWITCHES -m"
+		;;
+	-o|--overwrite|-overwrite|overwrite)
+		shift
+		OV=yes
+		SWITCHES="$SWITCHES -o"
+		;;
+	-f|--force|-force|force)
+		shift
+		FORCE=yes
+		SWITCHES="$SWITCHES -f"
+		;;
+	-v|--verbose|-verbose|verbose)
+		shift
+		VERBOSE=yes
+		SWITCHES="$SWITCHES -v"
+		;;
+	-I|--files|-files)
+		shift
+		FILELIST="$1"
+		if [ "$FILELIST" = "" ]
+		then
+			echo "Specify a file with the filenames"
+			exit $FAILURE
+		fi
+		if [ ! -e $FILELIST ]
+		then
+			echo "Cannot find file list $FILELIST"
+			exit $FAILURE
+		fi
+		shift
+		SWITCHES="$SWITCHES -I $FILELIST"
+		;;
+	-i|--ignore-files|-ignore-files)
+		IGNOREI=yes
+		shift
+		SWITCHES="$SWITCHES -i"
+		;;
+	-X|--exclude|-exclude)
+		shift
+		EXCLUDE="$1"
+		if [ "$EXCLUDE" = "" ]
+		then
+			echo "Specify a file with the exclude list"
+			exit $FAILURE
+		fi
+		if [ ! -e $EXCLUDE ]
+		then
+			echo "Cannot find file list $EXCLUDE"
+			exit $FAILURE
+		fi
+		shift
+		SWITCHES="$SWITCHES -X $EXCLUDE"
+		;;
+	-x|--ignore-exclude|-ignore-exclude)
+		IGNOREX=yes
+		shift
+		SWITCHES="$SWITCHES -x"
+		;;
+	-M|--missing|-missing)
+		MISSING=yes
+		shift
+		SWITCHES="$SWITCHES -M"
+		;;
+	-r|--remove|-remove)
+		REMOVE=yes
+		shift
+		SWITCHES="$SWITCHES -r"
+		;;
+	-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	/*)
+
+		# To be saved is absolute which is good.
+		ARG="$1"
+		shift
+		break
+		;;
+	*)
+		echo "Name $1 should be an absolute pathname"
+		exit $FAILURE
+		;;
+	esac
+done
+
+# Normalize switches.
+SWITCHES="`echo ${SWITCHES} | sed 's/^ / /'`"
+
+# Show what we got.
+if [ $VERBOSE = yes ]
+then
+	echo "Switches in effect: $SWITCHES"
+	echo "Argument: $ARG"
+fi
+
+# Save directory.
+if [ "$DIRNAME" != "" ]
+then
+	SAVEDIR=$DIRECTORY/sys
+	if [ ! -d $SAVEDIR ]
+	then
+		echo "Cannot find $SAVEDIR"
+		exit $FAILURE
+	fi
+else
+
+	# Take the default.
+	SAVEDIR=$HOME/save/$HN/sys
+
+	# Create when needed.
+	$E /bin/mkdir -p $SAVEDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Error creating $SAVEDIR"
+		exit $FAILURE
+	else
+		if [ $VERBOSE = yes ]
+		then
+			echo "Created $SAVEDIR"
+		fi
+	fi
+fi
+if [ $VERBOSE = yes ]
+then
+	echo "Using save directory $SAVEDIR"
+fi
+
+# Saved files list.
+SAVELIST=$SAVEDIR/$SAVELISTNAME
+
+# Extra stuff for exclude and include.
+EXCLUDEFILE=$HOME/savesys.exc
+if [ "$EXCLUDE" = "" ]
+then
+
+	# Exclude switch not present.
+	if [ -r $EXCLUDEFILE ]
+	then
+
+		# Use default exclude file if present.
+		if [ $IGNOREX != yes ]
+		then
+			EXCLUDE=$EXCLUDEFILE
+			if [ $VERBOSE = yes ]
+			then
+				echo "Exclude file found $EXCLUDE"
+			fi
+		else
+			if [ $VERBOSE = yes ]
+			then
+				echo "Exclude file $EXCLUDEFILE ignored with -x"
+			fi
+		fi
+	fi
+else
+	if [ $VERBOSE = yes ]
+	then
+		echo "Using exclude file $EXCLUDE"
+	fi
+fi
+INCLUDEFILE=$HOME/savesys.inc
+if [ "$FILELIST" = "" ]
+then
+
+	# No filelist switch.
+	if [ -r $INCLUDEFILE ]
+	then
+		if [ $IGNOREI != yes ]
+		then
+			FILELIST=$INCLUDEFILE
+			if [ $VERBOSE = yes ]
+			then
+				echo "Include file found $FILELIST"
+			fi
+		else
+			if [ $VERBOSE = yes ]
+			then
+				echo "Include file $INCLUDEFILE ignored with -i"
+			fi
+		fi
+	fi
+else
+	if [ $VERBOSE = yes ]
+	then
+		echo "Using include file $FILELIST"
+	fi
+fi
+
+# Copy file $1 to directory $2.
+
+copyfile() {
+
+	# Check.
+	if [ "$1" = "" ]
+	then
+		echo "Specify file"
+		return $FAILURE
+	fi
+	if [ "$2" = "" ]
+	then
+		echo "Specify directory"
+		return $FAILURE
+	fi
+	if [ "$3" != "" ]
+	then
+		echo "Extra argument $1 $2 $3"
+		return $FAILURE
+	fi
+	case "$1" in
+	/*)
+
+		# OK.
+		:
+		;;
+	*)
+
+		# Bail out.
+		echo "Path $1 not absolute"
+		return $FAILURE
+		;;
+	esac
+
+	# Error if there was a link.
+	if [ -L $1 ]
+	then
+		echo "$1 is a link - cannot save"
+		return $FAILURE
+	fi
+
+	# Check.
+	if [ ! -e $1 ]
+	then
+		echo "Cannot find $1"
+		return $FAILURE
+	fi
+
+	# Check.
+	if [ ! -r $1 ]
+	then
+		echo "Cannot read $1"
+		return $FAILURE
+	fi
+
+	# Create directory if needed.
+	if [ ! -d $2 ]
+	then
+		$E /bin/mkdir -p $2
+		if [ $? -ne 0 ]
+		then
+			echo "Error creating $2"
+			return $FAILURE
+		fi
+	fi
+
+	# Copy.
+	$E /bin/cp -p $1 $2/
+	if [ $? -ne 0 ]
+	then
+		echo "Error saving $1 to $2"
+		return $FAILURE
+	fi
+
+	# Success.
+	return 0
+}
+
+# Check and then copy file $1 to directory $2.
+
+copycheck() {
+
+	# Get state.
+	STATE="$1"
+	shift
+
+	case $STATE in
+	older-skipped)
+
+		# Just skip, no copy - early return.
+		if [ $VERBOSE = yes ]
+		then
+			echo "$1 older-skipped"
+		fi
+		return 0
+		;;
+	esac
+
+	# Do not copy excluded files.
+	if [ "$EXCLUDE" != "" ]
+	then
+
+		# Signal exclusion via flag file.
+		rm -f $XC
+		cat $EXCLUDE | while read EXPAT
+		do
+			EXPAT="`echo $EXPAT | sed 's/\*/\.\*/'`"
+			if echo "${1}" | egrep -e "^${EXPAT}\$" >/dev/null
+			then
+
+				# File excluded.
+				if [ $VERBOSE = yes ]
+				then
+					echo "$1 excluded"
+					touch $XC
+					break
+				fi
+			else
+
+				# Not this pattern.
+				:
+			fi
+		done
+		if [ ! -e $XC ]
+		then
+
+			# There is an exclude but no match.
+			if [ $CHECK = no ]
+			then
+
+				# No match, copy.
+				copyfile "$1" "$2"
+				if [ $? -ne 0 ]
+				then
+					return $FAILURE
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					echo "$1 $STATE"
+				fi
+			else
+
+				# Just check.
+				echo "$1 -> $2"
+			fi
+		fi
+	else
+
+		# No exclude just copy.
+		if [ $CHECK = no ]
+		then
+			copyfile "$1" "$2"
+			if [ $? -ne 0 ]
+			then
+				return $FAILURE
+			fi
+			if [ $VERBOSE = yes ]
+			then
+				echo "$1 $STATE"
+			fi
+		else
+
+			# Just check.
+			echo "$1 -> $2"
+		fi
+	fi
+	return 0
+}
+
+# Save file.
+
+savefile() {
+
+	# File to be saved.
+	# Expected to be an absolute path.
+	# Expected to exist.
+	TBS="$1"
+
+	# Original directory.
+	DIR="`dirname $TBS`"
+
+	# To be saved directory.
+	TBSD=${SAVEDIR}${DIR}
+
+	# File name.
+	NAME="`basename $TBS`"
+
+	# Save file name.
+	SAVEFILE=$TBSD/$NAME
+
+	# Do not overwrite as default.
+	if [ $OV != yes ]
+	then
+		if [ -e $SAVEFILE ]
+		then
+
+			# Save file already exist.
+			if [ $CHECK = yes ]
+			then
+
+				# Check only.
+				if diff $TBS $TBSD/$NAME >/dev/null
+				then
+					echo "$TBS saved-already"
+				else
+					echo "$TBS differs"
+				fi
+			else
+
+				# Do not overwrite, bail out.
+				echo "Saved file $TBSD/$NAME already exist"
+				return $FAILURE
+			fi
+		fi
+	fi
+
+	# Can overwrite if we are here.
+	if [ -e $SAVEFILE ]
+	then
+		if diff $TBS $SAVEFILE >/dev/null
+		then
+			if [ $VERBOSE = yes ]
+			then
+				if [ $CHECK != yes ]
+				then
+
+					# Do not report when just checking.
+					echo "$TBS same-skipped"
+				fi
+			fi
+		else
+
+			# Differs.
+			if [ $TBS -nt $SAVEFILE ]
+			then
+
+				# To be saved is newer. Overwrite with the
+				# newer one.
+				copycheck newer-saved $TBS $TBSD
+				if [ $? -ne 0 ]
+				then
+					return $FAILURE
+				fi
+			else
+
+				# To be saved is older than the saved copy.
+				# Do not overwrite unless forced.
+				if [ $FORCE = yes ]
+				then
+
+					# Overwrite anyway.
+					copycheck save-forced $TBS $TBSD
+					if [ $? -ne 0 ]
+					then
+						return $FAILURE
+					fi
+				else
+
+					# Don't copy, state older-skipped means no copy.
+					copycheck older-skipped $TBS $TBSD
+					if [ $? -ne 0 ]
+					then
+						return $FAILURE
+					fi
+				fi
+			fi
+		fi
+	else
+
+		# New file, no saved copy.
+		copycheck new-saved $TBS $TBSD
+		if [ $? -ne 0 ]
+		then
+			return $FAILURE
+		fi
+	fi
+	return 0
+}
+
+# Save directory.
+
+savedir() {
+	rm -f $BAILOUT
+	find $1 -type f -print | while read FF REST
+	do
+		if [ "$REST" != "" ]
+		then
+
+			# Error in subshell. Signal exit.
+			echo "Blank in file name at $FF $REST"
+			touch $BAILOUT
+			break
+		else
+			savefile $FF
+			if [ $? -ne 0 ]
+			then
+				touch $BAILOUT
+				break
+			fi
+		fi
+	done
+	if [ -e $BAILOUT ]
+	then
+
+		# And exit when signalled.
+		rm -f $BAILOUT
+		return $FAILURE
+	fi
+}
+
+# Save file or directory.
+
+save() {
+	if [ "$1" = "" ]
+	then
+		echo "No argument for save"
+		exit $FAILURE
+	fi
+	if [ "$2" != "" ]
+	then
+		echo "Extra parameter received with function save"
+		exit $FAILURE
+	fi
+
+	# Check if it is a directory.
+	if [ -d $1 ]
+	then
+
+		# Directory, check for exclude here.
+		if [ "$EXCLUDE" != "" ]
+		then
+			rm -f $XC
+			cat $EXCLUDE | while read EXPAT
+			do
+				EXPAT="`echo $EXPAT | sed 's/\*/\.\*/'`"
+				if echo "${1}" | egrep -e "^${EXPAT}" >/dev/null
+				then
+
+					# Directory excluded. Do not exclude file by file.
+					if [ $VERBOSE = yes ]
+					then
+						echo "$1 directory-excluded"
+						touch $XC
+						break
+					fi
+				else
+
+					# Not this pattern.
+					:
+				fi
+			done
+			if [ ! -e $XC ]
+			then
+
+				# There is an exclude but no match. Save it.
+				savedir $1
+				if [ $? -ne 0 ]
+				then
+					return $FAILURE
+				fi
+			else
+
+				# There was a match to exclude. Nothing to do.
+				:
+			fi
+		else
+
+			# No exclude just save.
+			savedir $1
+			if [ $? -ne 0 ]
+			then
+				return $FAILURE
+			fi
+		fi
+	else
+
+		# It's a file.
+		savefile $1
+		if [ $? -ne 0 ]
+		then
+			return $FAILURE
+		fi
+	fi
+}
+
+# List with attributes.
+
+attriblist() {
+
+	# Get attributes with stat and save.
+	PWD="`pwd`"
+	cd $SAVEDIR
+	# Previous version. Difficult to restore from symbolic permissions.
+	#find . -type f -ls | sed 's/ \.\// \//' | tee $SAVELIST
+	find . -type f -exec stat -f '%p %Sp %Su %Sg %Sm %N' -t '%Y-%m-%dT%H:%M:%S' {} \; | \
+		awk ' {
+	printf "%d %s %-8s %-8s %s %s\n", $1, $2, $3, $4, $5, $6
+} ' | sed 's/ \.\// \//'
+	cd $PWD
+}
+
+# Save list.
+
+savelist() {
+	if [ $CHECK = no ]
+	then
+		attriblist > ${SAVELIST}
+	else
+		if [ $VERBOSE = yes ]
+		then
+			echo "Check only not updating $SAVELIST"
+		fi
+	fi
+}
+
+# Check. Some switches forbid arguments.
+NOARG=no
+if [ $LIST = yes ]
+then
+	NOARG=yes
+elif [ $MOD = yes ]
+then
+	NOARG=yes
+elif [ "$FILELIST" != "" ]
+then
+	NOARG=yes
+fi
+if [ "$ARG" = "" ]
+then
+	if [ $NOARG != yes ]
+	then
+
+		# Needs an argument.
+		echo "Specify file to be saved"
+		exit $FAILURE
+	fi
+else
+
+	# There is an argument.
+	if [ $NOARG = yes ]
+	then
+		echo "Specified switches $SWITCHES"
+		echo "Using switch -l, -m or -I, argument $ARG would be ignored"
+		exit $FAILURE
+	else
+
+		# Check argument.
+		if [ ! -e $ARG ]
+		then
+			echo "Cannot find $ARG"
+			exit $FAILURE
+		fi
+	fi
+fi
+
+# According to options.
+if [ $LIST = yes ]
+then
+
+	# Show the list.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Save directory is $SAVEDIR"
+	fi
+	if [ -r $SAVELIST ]
+	then
+		cat $SAVELIST
+	else
+		echo "No saved list file $SAVELIST"
+		echo "Use -u to update/create the list file"
+		exit $FAILURE
+	fi
+	if [ $VERBOSE = yes ]
+	then
+		echo "Used saved list file $SAVELIST"
+	fi
+elif [ $UPDATE = yes ]
+then
+
+	# Update/create the list file.
+	# Script setprot can be used to set protections
+	# based upon the saved list file.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Save directory is $SAVEDIR"
+		echo "Updating list file $SAVELIST"
+	fi
+	savelist
+	if [ $VERBOSE = yes ]
+	then
+		echo "Listing is saved as $SAVELIST"
+	fi
+elif [ $MISSING = yes ]
+then
+
+	# Files missing from the system but present in the saved tree.
+	# These are files had been removed from the system.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Files missing from the system but present in the saved directory tree"
+	fi
+	PWD="`pwd`"
+	cd $SAVEDIR
+	rm -f $BAILOUT
+	find . -type f -print | sed 's/\.//' | while read F
+	do
+		case $F in
+		/${SAVELISTNAME})
+
+			# Skip saved list, not a real file.
+			;;
+		*)
+			if [ -r $F ]
+			then
+
+				# OK.
+				:
+			else
+
+				# Report MIA.
+				if [ $REMOVE = yes ]
+				then
+					rm .${F}
+					if [ $? -ne 0 ]
+					then
+						echo "Error removing $F"
+						touch $BAILOUT
+						break
+					fi
+					if [ $VERBOSE = yes ]
+					then
+						echo "$F missing-removed"
+					fi
+				else
+					echo "$F"
+				fi
+			fi
+		esac
+	done
+	cd $PWD
+	if [ -r $BAILOUT ]
+	then
+		exit $FAILURE
+	fi
+elif [ $MOD = yes ]
+then
+
+	# Mod-ded files.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Using modded files"
+	fi
+	if [ "$DIRECTORY" = "" ]
+	then
+		echo "For -m you also have to specify -d"
+		exit $FAILURE
+	fi
+
+	# Save modded files one by one.
+	rm -f $BAILOUT
+	mod dirlast | while read F REST
+	do
+
+		# Check.
+		if [ "$REST" != "" ]
+		then
+			echo "There is a blank in $F $REST - confused"
+			touch $BAILOUT
+			break
+		fi
+
+		# Save.
+		savefile $F
+		if [ $? -ne 0 ]
+		then
+
+			# Signal error.
+			touch $BAILOUT
+			break
+		fi
+	done
+	if [ -e $BAILOUT ]
+	then
+
+		# Quit when error.
+		rm -f $BAILOUT
+		exit $FAILURE
+	fi
+
+	# We are cool.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Updating list file $SAVELIST"
+	fi
+	savelist
+elif [ "$FILELIST" != "" ]
+then
+
+	# Include file list specified.
+	# Note that there are two levels of subshells so exit from
+	# those is tricky.
+	# Processing the include file list.
+	rm -f $BAILOUT
+	cat $FILELIST | while read F REST
+	do
+
+		# Check.
+		case $F in
+		\#|"")
+
+			# Skip comments.
+			;;
+		*)
+			if [ "$REST" != "" ]
+			then
+
+				# Signal error.
+				echo "There is a blank in the include file list line $F $REST"
+				touch $BAILOUT
+				break
+			fi
+			;;
+		esac
+
+		# Deal with star in the file list line.
+		case $F in
+		\#|"")
+
+			# Comment line.
+			;;
+		*\**)
+
+			# Meta. There is a star in it.
+			# This will be in a subshell so we use a flag file
+			# to bail out. Also, this is an inner subshell so
+			# have to have a different flag file.
+			rm -f $BAILOUT2
+			ls $F | while read FF REST
+			do
+
+				# Check.
+				if [ "$REST" != "" ]
+				then
+
+					# Print error message and signal bailout.
+					echo "There is a blank in $FF $REST"
+					touch $BAILOUT2
+					break
+				fi
+
+				# Try to save.
+				save $FF
+				if [ $? -ne 0 ]
+				then
+
+					# There was an error so break out from the inner cycle.
+					touch $BAILOUT2
+					break
+				fi
+			done
+			if [ -e $BAILOUT2 ]
+			then
+
+				# Bail out due to error in the inner subshell.
+				# Signal error to the outer subshell.
+				rm -f $BAILOUT2
+				touch $BAILOUT
+				break
+			fi
+			;;
+		*)
+
+			# Not meta. File or directory. Just save.
+			save $F
+			if [ $? -ne 0 ]
+			then
+				touch $BAILOUT
+				break
+			fi
+			;;
+		esac
+	done
+	if [ -e $BAILOUT ]
+	then
+
+		# Bail out from the outer subshell.
+		rm -f $BAILOUT
+		exit $FAILURE
+	fi
+
+	# We are cool.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Updating list file $SAVELIST"
+	fi
+	savelist
+else
+
+	# Got arguments. File or directory.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Specified argument $ARG"
+	fi
+	if [ "$1" != "" ]
+	then
+		echo "Extra argument $1 - cannot take more than one"
+		exit $FAILURE
+	fi
+	save $ARG
+	if [ $? -ne 0 ]
+	then
+		exit $FAILURE
+	fi
+	if [ $VERBOSE = yes ]
+	then
+		echo "Updating list file $SAVELIST"
+	fi
+	savelist
+fi
+
+# Finish.
+cleanup
+exit $SUCCESS
+

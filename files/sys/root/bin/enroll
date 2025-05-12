@@ -1,0 +1,88 @@
+#!/bin/sh
+
+# Enroll.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help)
+	 cat <<!EOF
+This script does fingerprint enrollment.
+It uses the right index finger. We all have
+that finger.
+Usage:
+	enroll user
+where
+    user        is the username when running the
+                script as root. Otherwise ignored.
+!EOF
+	exit $FAILURE
+esac
+
+# Arguments.
+USERNAME="${1}"
+case "${USERNAME}" in
+*[!-_a-zA-Z0-9]*)
+	echo "Alien characters in argument"
+	exit $FAILURE
+	;;
+esac
+LEN="`/bin/echo \"${1}\" | /usr/bin/awk ' { print length($0) } '`"
+if [ $LEN -gt 38 ]
+then
+	echo "Argument too long"
+	exit $FAILURE
+fi
+
+# Check.
+if [ `id -u` -ne 0 ]
+then
+	echo "You have to run this with uid 0"
+	exit $FAILURE
+fi
+
+# Enroll.
+if [ "${DOAS_USER}" == "" ]
+then
+
+	# Running stand-alone.
+	if [ "${USERNAME}" = "" ]
+	then
+
+		# Need to have username.
+		echo "Specify username"
+		exit $FAILURE
+	fi
+	if /usr/bin/getent passwd "${USERNAME}" >/dev/null
+	then
+		:
+	else
+		echo "Cannot find user ${USERNAME}"
+		exit $FAILURE
+	fi
+	/usr/local/bin/enroll_fingerprint -f 7 -u "${USERNAME}"
+	STATUS=$?
+else
+
+	# Running under doas.
+	if [ "${USERNAME}" != "" ]
+	then
+		echo "Username ignored"
+	fi
+	if /usr/bin/getent passwd "${DOAS_USER}" >/dev/null
+	then
+		:
+	else
+		echo "Cannot find user - confused"
+		exit $FAILURE
+	fi
+	/usr/local/bin/enroll_fingerprint -f 7 -u "${DOAS_USER}"
+	STATUS=$?
+fi
+
+# Finish.
+exit $STATUS
+

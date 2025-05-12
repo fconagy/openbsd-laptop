@@ -1,0 +1,205 @@
+#!/bin/sh
+
+# Find duplicates by size.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script finds duplicate files by size or name only.
+Usage:
+    findup [-m minsize][-s|-n] [dirs...]
+where
+    -m minsize  is the minimum file size to consider, in bytes.
+                The default is 512. Applies to both by size and by name.
+    -s          search duplicates by size.
+                This is the default.
+    -n          search duplicates by name.
+    dirs        is the directory list, the default is
+                the current directory.
+Note:
+Switches should be specified before directory arguments.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Options.
+MINSIZE=512
+BYSIZE=no
+BYNAME=no
+while [ "$1" != "" ]
+do
+	case $1 in
+	-m|--minsize|-minsize)
+		shift
+		MINSIZE="$1"
+		if [ "$MINSIZE" = "" ]
+		then
+			echo "Specify minimum size"
+			exit $FAILURE
+		fi
+		shift
+		;;
+	-s|--size|-size)
+		BYSIZE=yes
+		SORTCMD="sort -rn -k 1"
+		shift
+		;;
+	-n|--name|-name)
+		BYNAME=yes
+		SORTCMD="sort -k 2"
+		shift
+		;;
+	-*)
+		echo "Wrong switch"
+		exit $FAILURE
+		;;
+	*)
+
+		# Argument.
+		break
+		;;
+	esac
+done
+if [ $BYSIZE = no -a $BYNAME = no ]
+then
+
+	# Size is the default.
+	BYSIZE=yes
+	SORTCMD="sort -rn -k 1"
+fi
+if [ $BYSIZE = yes -a $BYNAME = yes ]
+then
+	echo "Cannot specify both -s and -n"
+	exit $FAILURE
+fi
+export BYSIZE BYNAME
+
+# Minimum size of file.
+case $MINSIZE in
+*[!0-9]*)
+	echo "$MINSIZE not a number"
+	exit $FAILURE
+	;;
+*)
+	;;
+esac
+export MINSIZE
+
+# Directory list.
+DIRS="$*"
+if [ "$DIRS" = "" ]
+then
+	DIRS='.'
+fi
+
+# Check.
+for D in $DIRS
+do
+	if [ ! -e $D ]
+	then
+		echo "$D not found"
+		exit $FAILURE
+	fi
+	if [ ! -d $D ]
+	then
+		echo "$D not a directory"
+		exit $FAILURE
+	fi
+done
+if [ "$SORTCMD" = "" ]
+then
+	echo "Sort command is the empty string - confused"
+	exit $FAILURE
+fi
+
+# Get paths and sizes.
+(
+	for D in $DIRS
+	do
+		find $D -type f -print0
+	done ) | xargs -0 stat -f '%z %N' | $SORTCMD | awk '
+BEGIN {
+	prev = ""
+	dup = 0
+	min = ENVIRON["MINSIZE"]
+	bysize = ENVIRON["BYSIZE"]
+	byname = ENVIRON["BYNAME"]
+	format = "%20d %s\n"
+	prevsize = 0
+	prevpath = ""
+}
+ {
+	line = $0
+	size = $1
+	if (size < min)
+	{
+
+		# Too small.
+		next
+	}
+	pos = index(line, " ")
+	path = substr(line, pos + 1)
+	n = split(line, a, "/")
+	name = a[n]
+	if (bysize == "yes")
+	{
+		if (prevsize == size)
+		{
+
+			# Duplicate.
+			printf format, prevsize, prevpath
+			dup = 1
+		}
+		else
+		{
+
+			# Print the last duplicate.
+			if (dup == 1)
+			{
+				printf format, prevsize, prevpath
+			}
+			dup = 0
+		}
+	}
+	if (byname == "yes")
+	{
+		if (name == prevname)
+		{
+
+			# Duplicate.
+			printf format, prevsize, prevpath
+			dup = 1
+		}
+		else
+		{
+
+			# Print the last duplicate.
+			if (dup == 1)
+			{
+				printf format, prevsize, prevpath
+			}
+			dup = 0
+		}
+	}
+	prevsize = size
+	prevpath = path
+	prevname = name
+}
+END {
+
+	# Special case when ends with duplicates.
+	if (dup == 1)
+	{
+		printf format, prevsize, prevpath
+	}
+} '
+
+# Finish.
+exit $SUCCESS
+

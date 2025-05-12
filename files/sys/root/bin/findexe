@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Find executables, the real ones, that is.
+
+find . -type f | xargs file | grep ' ELF ' | \
+	awk ' { print $1 } ' | sed 's/:$//'
+

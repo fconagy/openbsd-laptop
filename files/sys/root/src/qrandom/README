@@ -1,0 +1,61 @@
+
+
+
+    Quantis random number interface
+
+This is a simple interface to the Quantis random number generator.
+This device is manufactured by id Quantique, a small Swiss company.
+It is a hardware random number generator giving true random numbers
+in the sense of quantum mechanics.
+
+OpenBSD uses /etc/random.seed and /var/db/host.random for entropy.
+
+The program works only with the USB version and can have only one
+device connected. It is based on the original Quantis code but
+drastically simplified. It consists of a library and an example
+program. The sample program prints random numbers in various formats.
+The library implements a simple interface using LIBUSB calls.
+It uses the synchronous version of the LIBUSB interface.
+Builds static and shared versions of the library. The library also
+has a sample test program.
+
+This directory contains:
+
+Makefile            is the make faile to build the library and the
+                    sample program / utility.
+README              this readme file.
+include             is a directory contains the library header file
+                    (qusb.h).
+lib                 is a directory with the library code. Builds
+                    static and shared versions of the library.
+qrandom.c           is the sample utility program.
+qrandom.man         manual page for the utility.
+qrandom             is the executable built.
+qrngd.c             simple daemon to run in the background and inject
+                    random data into the entropy pool at times.
+qrngd.man           is the manual page for the daemon.
+qrngd               executable.
+
+The make file is prepared only for OpenBSD and FreeBSD but it is
+fairly generic so it should work with most unix-type systems.
+The targets are:
+all                 default target, build everything.
+test                run tests.
+install             install library, executable and manual pages.
+uninstall           undo the install.
+clean               clean up
+distclean           clean up
+clobber				clean up
+lib                 builds the library.
+libtest             run library tests.
+libinstall          install library. This is necessary only when
+                    the shared library is in use.
+libuninstall        undo the install.
+
+The library has got a make file in the library directory, will
+also build a utility program for testing the library. In the
+library subdirectory:
+Makefile            to build the library.
+qusb.c              source file for the library.
+qusb.man            manual pages for the test / utility program.
+

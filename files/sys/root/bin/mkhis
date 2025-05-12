@@ -1,0 +1,100 @@
+#!/bin/sh
+
+# Create history checkpoint.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script creates history.
+Usage:
+    mkhis [-h]
+where
+    -h          prints this help.
+The script will create a 'his' subdirectory under
+home and will save all the command line history and
+similar files under that directory for the current
+account or, if run under root then the for the popular
+root accounts.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Timestamp.
+STAMP="`date +%Y-%m-%dT%H%M`"
+
+# Host name.
+HOSTNAME="`hostname | awk -F'.' ' { print $1 } '`"
+
+# File list for files to save on various systems.
+FILELIST=".bash_history .history .history.* .sh_history .lesshst \
+ smit.log smit.script smit.transaction"
+
+# Directory list. Root files or home.
+if [ `id -u` -eq 0 ]
+then
+	DIRLIST="/ /root /h/admins/system"
+else
+	DIRLIST="$HOME"
+fi
+
+# History directory.
+HISTDIR=$HOME/his/$HOSTNAME/$STAMP
+
+# Copy history files.
+for D in $DIRLIST
+do
+	if [ -d $D ]
+	then
+		for F in $FILELIST
+		do
+			NAME="`basename $D`"
+			if [ "$NAME" = "/" ]
+			then
+				NAME=slash
+			fi
+			DIRNAME=${HISTDIR}/${NAME}
+			if [ ! -d $DIRNAME ]
+			then
+				mkdir -p $DIRNAME
+			fi
+			case $D in
+			/)
+				FROM="/$F"
+				;;
+			*)
+				FROM=$D/$F
+				;;
+			esac
+			TO=$DIRNAME/$F
+			if [ -f $FROM ]
+			then
+				if [ -r $FROM ]
+				then
+					echo "$FROM"
+					cp -p $FROM $TO
+					if [ $? -ne 0 ]
+					then
+						echo "Error saving $F"
+						exit $FAILURE
+					fi
+				else
+					echo "$F ignored"
+				fi
+			fi
+		done
+	fi
+done
+
+# Also save it as comes.
+echo "Saving the output of history command"
+$SHELL -i -c "fc -l 1" >$HISTDIR/history.txt
+
+# Finish.
+exit $SUCCESS
+

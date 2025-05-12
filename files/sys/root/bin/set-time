@@ -1,0 +1,49 @@
+#!/bin/sh
+
+# Set time and date via NTP. Not running the daemon.
+
+# Use ntpdate from the NTP package.
+# That will install to under /usr/local.
+PATH=$PATH:/root/bin:/usr/local/sbin:/usr/local/bin
+export PATH
+LOG=/var/log/ntpdate.log
+DONE=/var/run/done.flag
+NOTCONNECTED=/var/run/notconnected.flag
+
+rm -f $DONE $NOTCONNECTED
+touch $NOTCONNECTED
+netstat -in | grep -v '^Name' | egrep -v 'lo0|pflog0|enc0' | awk ' { print $1 } ' | \
+	sort -u | egrep -v -e '.*\*$' | \
+while read IF REST
+do
+	rm -f $NOTCONNECTED
+
+	# When the network is up.
+	ntpdate -4 -b se.pool.ntp.org >$LOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Executing ntpdate returned an error"
+		echo "Executing ntpdate returned an error at `date`" >>$LOG
+		cat $LOG
+		exit 1
+	else
+		touch $DONE
+	fi
+done
+
+# Finish.
+if [ ! -e $NOTCONNECTED ]
+then
+	if [ ! -r $DONE ]
+	then
+		echo "Finished at `date` and not done"
+		echo "Finished at `date` and not done" >>$LOG
+		exit 1
+	else
+		rm -f $DONE
+		echo "Done at `date`"
+		echo "Done at `date`" >>$LOG
+	fi
+fi
+exit 0
+

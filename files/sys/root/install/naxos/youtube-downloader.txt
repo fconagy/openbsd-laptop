@@ -1,0 +1,19 @@
+
+
+    Youtube downloader
+
+The old youtube-dl is dead. A fork which works is
+  https://github.com/yt-dlp/yt-dlp
+
+Get the tarball and build and non-root.
+  wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.tar.gz
+  tar -z -xf yt-dlp.tar.gz
+  cd yt-dlp
+  gmake clean
+  gmake yt-dlp
+  gmake yt-dlp.1
+This should build the python script-executable.
+  cp yt-dlp ~/local/bin/
+  cp yt-dlp.1 ~/local/man/man1/
+The ydl script should work just the same as before.
+

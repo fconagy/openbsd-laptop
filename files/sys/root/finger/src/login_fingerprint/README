@@ -1,0 +1,16 @@
+Use enroll_fingerprint(1) to enroll a fingerprint for authentication.
+To enroll your right index finger (7th) do the following:
+
+$ enroll_fingerprint -f 7
+
+Then you can edit login.conf to create a login class that uses
+fingerprint authentication:
+
+#
+# The fingerprint login class allows the fingerprint and passwd
+# authentication methods and checks your 7th (right index) finger.
+#
+fingerprint:\
+        :auth=-fingerprint,passwd:\
+        :x-fingerprint=7:\
+        :tc=default:

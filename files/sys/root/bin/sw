@@ -1,0 +1,357 @@
+#!/bin/sh
+
+# Local sw tree operations.
+
+# This is the directory tree which looks like /usr/local.
+# It is used since /usr/local/ is already reserved for the
+# OpenBSD ports collection.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script is for local sw tree operations.
+Usage:
+    sw [-v] help|list|copy
+where
+    -v      verbose .
+    help    prints this help.
+    list    list actions as specified by the config file.
+    check   check if destination files present.
+    copy    copy the required files.
+    prot    set protections.
+    init    initialize.
+There is a config file under ~/etc, sw.conf.
+That contains lines like:
+
+  # From bin.
+  /root/bin
+      mod mkhis conf dfs
+      dirsync
+
+  # Local.
+  /root/local/bin
+      usleep
+
+  /root/bin
+      mod
+
+The line with a full pathname is a source directory
+specification from which the files listed will be
+replicated to the sw directory tree, which is /sw.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Flags.
+VERBOSE=no
+case $1 in
+-v|--verbose)
+	shift
+	VERBOSE=yes
+	;;
+-*)
+	echo "Strange switch $1"
+	exit $FAILURE
+	;;
+esac
+
+# Config file.
+RUNDIR="`dirname $0`"
+CONFIG=$RUNDIR/../etc/sw.conf
+if [ ! -r $CONFIG ]
+then
+	echo "Cannot find config file $CONFIG"
+	exit $FAILURE
+fi
+
+# Software top.
+SW=/usr/sw
+if [ ! -e $SW ]
+then
+	mkdir -p $SW
+	if [ $? -ne 0 ]
+	then
+		echo "Error creating directory $SW"
+		exit $FAILURE
+	fi
+	echo "Created $SW"
+fi
+
+# List of files/directories.
+FROMDIRLIST=sw.from
+TODIRLIST=sw.to
+FILELIST=sw.files
+
+# Local group.
+LG=locals
+if grep $LG /etc/group >/dev/null
+then
+	:
+else
+	echo "Cannot find group $LG"
+	exit $FAILURE
+fi
+
+# Copy.
+
+copy() {
+	if [ -e $FILELIST ]
+	then
+		for F in `cat $FILELIST`
+		do
+			FROM="`cat $FROMDIRLIST`/$F"
+			if [ ! -e $FROM ]
+			then
+				echo "Cannot find $FROM"
+				exit $FAILURE
+			fi
+			TO="`cat $TODIRLIST`"
+			DESTDIR="$TO"
+			if [ ! -d $DESTDIR ]
+			then
+				mkdir -p $DESTDIR
+				if [ $? -ne 0 ]
+				then
+					echo "Cannot create $DESTDIR"
+					exit $FAILURE
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					echo "$DESTDIR created"
+				fi
+			fi
+			TOFILE=${TO}/$F
+			if [ -e $TOFILE ]
+			then
+				if [ $FROM -nt $TOFILE ]
+				then
+					cp -p $FROM ${TO}/
+					if [ $? -ne 0 ]
+					then
+						echo "Copy failed $FROM $TO"
+						exit $FAILURE
+					fi
+					if [ $VERBOSE = yes ]
+					then
+						echo "$TOFILE updated"
+					fi
+				else
+					if [ $VERBOSE = yes ]
+					then
+						echo "$TOFILE skipped"
+					fi
+				fi
+			else
+				cp -p $FROM ${TO}/
+				if [ $? -ne 0 ]
+				then
+					echo "Copy failed for $FROM to $TO"
+					exit $FAILURE
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					echo "$TOFILE copied"
+				fi
+			fi
+		done
+		rm -f $FILELIST
+	else
+
+		# First invocation.
+		:
+	fi
+}
+
+# List.
+
+list() {
+	if [ -e $FILELIST ]
+	then
+		echo "`cat $FROMDIRLIST` -> `cat $TODIRLIST`"
+		for F in `cat $FILELIST`
+		do
+			FROM="`cat $FROMDIRLIST`/$F"
+			if [ ! -e $FROM ]
+			then
+				echo "Cannot find $FROM"
+			fi
+			TO="`cat $TODIRLIST`"
+			if [ ! -d $TO ]
+			then
+				echo "Cannot find $TO"
+			fi
+			echo "    $FROM"
+		done
+		rm -f $FILELIST
+	else
+
+		# First invocation.
+		:
+	fi
+}
+
+# Check.
+
+check() {
+	if [ -e $FILELIST ]
+	then
+		for F in `cat $FILELIST`
+		do
+			FROM="`cat $FROMDIRLIST`/$F"
+			if [ ! -e $FROM ]
+			then
+				echo "$FROM notfound"
+			fi
+			TODIR="`cat $TODIRLIST`"
+			TO="$TODIR/$F"
+			if [ ! -e $TO ]
+			then
+				echo "$TO notfound"
+			else
+				if [ $FROM -nt $TO ]
+				then
+					echo "$TO old"
+				else
+					diff $FROM $TO >/dev/null
+					if [ $? -ne 0 ]
+					then
+						echo "$TO differs"
+					else
+						echo "$TO ok"
+					fi
+				fi
+			fi
+		done
+		rm -f $FILELIST
+	else
+
+		# First invocation.
+		:
+	fi
+}
+
+# Protections.
+
+prot() {
+	if [ "$SW" = "" ]
+	then
+		echo "Environment variable SW not defined - confused"
+		exit $FAILURE
+	fi
+	if [ ! -e $SW ]
+	then
+		echo "Cannot find $SW - confused"
+		exit $FAILURE
+	fi
+	set -e
+	cd $SW
+
+	# Create directories.
+	mkdir -p $SW/bin
+	mkdir -p $SW/local/bin
+	mkdir -p $SW/local/include
+	mkdir -p $SW/local/lib
+	mkdir -p $SW/local/man
+
+	# Set protections.
+	find $SW -type d -exec chmod g=rwx {} \;
+	find $SW -type d -exec chmod o=rx {} \;
+	find $SW -type f -exec chmod g+rw {} \;
+	find $SW -type f -exec chmod o+r {} \;
+
+	# Set group.
+	find $SW -type d -exec chgrp $LG {} \;
+	find $SW -type f -exec chgrp $LG {} \;
+
+	# Paranoia.
+	find $SW -type f -exec chmod ug-s {} \;
+
+	# For directories to inherit protection/group for new files.
+	find $SW -type d -exec chmod g+s {} \;
+}
+
+# Interpret config file.
+
+inter() {
+	rm -f $FROMDIRLIST $TODIRLIST $FILELIST
+	cat $CONFIG | sed '/^[ 	]*#/d; /^#/d; s/#.*$//; /^$/d;' | \
+		while read FIRST REST
+	do
+		case $FIRST in
+		/*)
+
+			# Directory spec.
+			DIR=$FIRST
+			case $CMD in
+			copy)
+				copy
+				;;
+			list)
+				list
+				;;
+			check)
+				check
+				;;
+			esac
+			FROMDIR=$DIR
+			TODIR="`echo $DIR | sed 's/\/root\///;' | sed \"s#^#${SW}/#\"`"
+			echo $FROMDIR >$FROMDIRLIST
+			echo $TODIR >$TODIRLIST
+			;;
+		*)
+
+			# File spec.
+			FILE="$FIRST $REST"
+			echo $FILE >>$FILELIST
+			;;
+		esac
+	done
+}
+
+# Command (check).
+CMD="$1"
+if [ "$CMD" = "" ]
+then
+	echo "Specify command"
+	exit $FAILURE
+fi
+
+# Interpret config file.
+
+# Last one.
+case $CMD in
+copy|--copy)
+	inter
+	copy
+	;;
+list|--list)
+	inter
+	list
+	;;
+check|--check)
+	inter
+	check
+	;;
+prot|--prot)
+	prot
+	;;
+init|--init)
+	echo "Initializing $SW"
+	prot
+	;;
+*)
+	echo "Unknown command $CMD"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+rm -f $FROMDIRLIST $TODIRLIST $FILELIST
+exit $SUCCESS
+

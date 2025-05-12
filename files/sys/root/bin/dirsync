@@ -1,0 +1,203 @@
+#!/bin/sh
+
+# Sync directory with rsync.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script synchronizes directories using rsync.
+Usage:
+    dirsync [-v][-t][-d][-c|-s] source destination
+where
+    -v          verbose.
+    -t          test run, just report actions.
+    -d          delete files from the destination which
+                are not present at source.
+    -x file     specify file with exclude patterns.
+    -c          copy source to destination using rsync.
+    -s          synchronize source with destination.
+    --nochecksum will disable checksum computing to
+                go easy on the CPU.
+    source      source directory.
+    destination destination directory.
+There is no default, you have to specify copy or sync.
+You have to specify switches first, then arguments.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Extra switches. This is overwritten below.
+#ES="-i" # Print information.
+#ES="--info=all" # Very verbose.
+#ES="-n -i" # Dry run.
+ES=""
+
+# Commands. We can do copy or sync.
+CMD=""
+
+# Option handling.
+TST=no
+VERB=no
+XFILE=""
+while true
+do
+	case $1 in
+	--verbose|-verbose|-v)
+		VERB=yes
+		ES="$ES -i"
+		shift
+		;;
+	--test|-test|-t)
+		TST=yes
+		ES="$ES -n"
+		shift
+		;;
+	--delete|-delete|-d)
+		ES="$ES --delete"
+		shift
+		;;
+	--exclude|-exclude|-x)
+
+		# Exclude file specified.
+		shift
+		XFILE="$1"
+		case $XFILE in
+		"")
+			echo "You have to specify exclude file"
+			exit $FAILURE
+			;;
+		-*)
+
+			echo "Next word starts with hyphen - I expect a file name"
+			exit $FAILURE
+			;;
+		*)
+			;;
+		esac
+		if [ ! -r $XFILE ]
+		then
+			echo "Cannot find $XFILE"
+			exit $FAILURE
+		fi
+		shift
+		ES="$ES --exclude $XFILE"
+		;;
+	--copy|-copy|-c)
+		CMD=copy
+		shift
+		break
+		;;
+	--sync|-sync|-s)
+		CMD=sync
+		shift
+		break
+		;;
+	--nochecksum|-nochecksum)
+		ES="${ES} --cc=none"
+		shift
+		;;
+	--*|-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	*)
+
+		# No more option, these are arguments.
+		break
+		;;
+	"")
+
+		# No more arguments.
+		break
+		;;
+	esac
+done
+
+# Have to specify operation.
+if [ "$CMD" = "" ]
+then
+	echo "You have to specify the type of operations, either sync or copy"
+	exit $FAILURE
+fi
+
+# Source and destination directories.
+S="$1"
+D="$2"
+if [ "$S" = "" ]
+then
+	echo "Specify source directory"
+	exit $FAILURE
+fi
+if [ "$D" = "" ]
+then
+	echo "Specify destination directory"
+	exit $FAILURE
+fi
+if [ ! -d "$S" ]
+then
+	echo "Source directory $S does not exist"
+	exit $FAILURE
+fi
+if [ ! -d "$D" ]
+then
+	echo "Destination directory $D does not exist"
+	exit $FAILURE
+fi
+
+# Backup directories.
+SB="${S}.backup"
+DB="${D}.backup"
+
+# Log file.
+LOG=$HOME/dirsync.log
+#rm -f $LOG
+
+# Date command.
+DC="date +%Y-%m-%dT%H:%M:%S"
+
+# Copy.
+if [ $TST = yes ]
+then
+	echo "==== `${DC}` Next operation is dry run only" 2>&1 | tee -a $LOG
+	echo "==== `${DC}` Using extra switches $ES" 2>&1 | tee -a $LOG
+fi
+case $CMD in
+copy)
+	echo "==== `${DC}` Copy from $S to $D backup dir $DB" 2>&1 | tee -a $LOG
+	rsync $ES -r -auzb --backup-dir="$DB" "$S/" "$D/" 2>&1 | tee -a $LOG
+	if [ $? -ne 0 ]
+	then
+		echo "Error copying $S to $D"
+		exit $FAILURE
+	fi
+	;;
+sync)
+	echo "==== `${DC}` Sync $S $D" 2>&1 | tee -a $LOG
+	echo "==== `${DC}`   Get $D $S backup dir $SB" 2>&1 | tee -a $LOG
+	rsync $ES -r -auzb --backup-dir="$SB" "$D/" "$S/" 2>&1 | tee -a $LOG
+	if [ $? -ne 0 ]
+	then
+		echo "Error running rsnc $D to $S"
+		exit $FAILURE
+	fi
+	echo "==== `${DC}`   Put $S $D backup dir $DB" 2>&1 | tee -a $LOG
+	rsync $ES -r -auzb --backup-dir="$DB" "$S/" "$D/" 2>&1 | tee -a $LOG
+	if [ $? -ne 0 ]
+	then
+		echo "Error running rsync $S/ to $D"
+		exit $FAILURE
+	fi
+	;;
+esac
+
+# Finish.
+DCF="date +%Y-%m-%dT%H:%M:%S"
+echo "==== `${DCF}` Finished $S $D" 2>&1 | tee -a $LOG
+exit $SUCCESS
+

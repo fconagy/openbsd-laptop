@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# Find files with .orig extension.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|help)
+	cat <<!EOF
+Find files with .orig extension.
+Usage:
+    findorig [system|user|all]
+where
+    system      find files in the system part
+    user        find files under the home directory.
+    all         find files everywhere
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Where to search.
+WHERE=$1
+
+case $WHERE in
+system|all)
+
+	# Mounted file systems in system.
+	for D in / /usr
+	do
+		find $D -xdev -type f -name '*.orig' -print | \
+			egrep -v -e '^/usr/user[0-9][0-9]/|/root/'
+	done
+	;;
+user|all)
+
+	# Under home.
+	find $HOME -xdev -type f -name '*.orig' -print
+	;;
+esac
+

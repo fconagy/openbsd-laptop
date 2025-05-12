@@ -1,0 +1,195 @@
+#!/bin/sh
+
+# Xdm login window check, geometry computation or fonts.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Default command.
+CMD=geometry
+
+# Font list from xlsfonts.
+FONTS=xlsfonts.list
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script computes login window geometry
+from and for Xresources. Can also check fonts.
+Usage:
+    xdm-check [geometry|fonts|geomfonts]
+!EOF
+	exit $FAILURE
+	;;
+geometry)
+	CMD=geometry
+	shift
+	;;
+fonts)
+	if [ ! -r $FONTS ]
+	then
+		echo "Cannot find $FONTS - create with xlsfonts"
+		exit $FAILURE
+	fi
+	CMD=fonts
+	shift
+	;;
+geomfonts)
+	if [ ! -r $FONTS ]
+	then
+		echo "Cannot find $FONTS - create with xlsfonts"
+		exit $FAILURE
+	fi
+	CMD=geomfonts
+	shift
+	;;
+*)
+	echo "Unknown command $1"
+	exit $FAILURE
+	;;
+esac
+
+# Temp file names.
+TMPROW=row.tmp
+TMPCOLUMN=column.tmp
+TMPWIDTH=width.tmp
+TMPHEIGHT=height.tmp
+
+# The last relation op in the conditional.
+TMPREL=rel.tmp
+
+# Processing default case.
+TMPDEF=def.tmp
+
+# The default height.
+DEFHEIGHT=1000
+
+# Config file name.
+CONF="`mod dir Xresources | awk ' { print $2 } '`"
+if [ "$CONF" = "" ]
+then
+	echo "Error finding configuration file"
+	exit $FAILURE
+fi
+
+# Get width and height.
+rm -f $TMPDEF
+cat $CONF | while read P1 P2 P3 P4 REST
+do
+	#echo ">>>> '$P1' '$P2' '$P3' '$P4' '$REST'"
+	if [ $CMD = geometry -o $CMD = geomfonts ]
+	then
+		case $P1 in
+		xlogin\*geometry:*)
+
+			# Check.
+			if [ ! -r $TMPWIDTH ]
+			then
+				echo "Cannot find $TMPWIDTH"
+				exit $FAILURE
+			fi
+			if [ ! -r $TMPHEIGHT ]
+			then
+				echo "Cannot find $TMPHEIGTH"
+				exit $FAILURE
+			fi
+			if [ ! -r $TMPREL ]
+			then
+				echo "Cannot find $TMPREL"
+				exit $FAILURE
+			fi
+
+			# Window parameters coming from resource file.
+			WINWIDTH="`cat $TMPWIDTH`"
+			WINHEIGHT="`cat $TMPHEIGHT`"
+			REL="`cat $TMPREL`"
+
+			# Geometry spec.
+			WIDTH="`echo $P2 | sed 's/\+.*$//; s/x/ /' | awk ' { print $1 } '`"
+			HEIGHT="`echo $P2 | sed 's/\+.*$//; s/x/ /' | awk ' { print $2 } '`"
+
+			# BC is really strange.
+			bc <<!EOF >$TMPROW
+( $WINWIDTH - $WIDTH ) / 2
+quit
+!EOF
+			bc <<!EOF >$TMPCOLUMN
+( $WINHEIGHT - $HEIGHT ) / 2
+quit
+!EOF
+			ROW="`cat $TMPROW`"
+			COLUMN="`cat $TMPCOLUMN`"
+
+			# Print as geometry.
+			if [ -r $TMPDEF ]
+			then
+
+				# This was the #else case.
+				rm -f $TMPDEF
+				echo "! Default case, screen width $WINWIDTH height estimate $WINHEIGHT"
+				printf "%sx%s+%s+%s\n" $WIDTH $HEIGHT $ROW $COLUMN
+			else
+				echo "! Screen width $REL $WINWIDTH height estimate $WINHEIGHT"
+				printf "%sx%s+%s+%s\n" $WIDTH $HEIGHT $ROW $COLUMN
+			fi
+			;;
+		\#if|\#elif)
+
+			# Width.
+			if [ "$P4" = "" ]
+			then
+				echo "Width empty"
+				exit $FAILURE
+			fi
+			echo $P4 >$TMPWIDTH
+			echo $P3 >$TMPREL
+			case $P4 in
+			1600)
+				echo 1200 >$TMPHEIGHT
+				;;
+			1920)
+				echo 1080 >$TMPHEIGHT
+				;;
+			1440)
+				echo 960 >$TMPHEIGHT
+				;;
+			1024)
+				echo 768 >$TMPHEIGHT
+				;;
+			*)
+				echo 1000 >$TMPHEIGHT
+				;;
+			esac
+			;;
+		\#else)
+
+			# Default case.
+			touch $TMPDEF
+			echo $DEFHEIGHT >$TMPHEIGHT
+			;;
+		esac
+	fi
+	if [ $CMD = fonts -o $CMD = geomfonts ]
+	then
+		case $P1 in
+		*Font*|*font*|*Face*|*face*)
+
+			RESOURCE="$P1"
+			FONT="$P2"
+			if grep -- "^${P2}$" $FONTS >/dev/null 2>&1
+			then
+				echo "$P1 $P2 ok"
+			else
+				echo "$P1 $P2 notok"
+			fi
+			;;
+		esac
+	fi
+done
+rm -f $TMPROW $TMPCOLUMN $TMPWIDTH $TMPHEIGHT $TMPREL $TMPDEF
+
+# Finish.
+exit $SUCCESS
+

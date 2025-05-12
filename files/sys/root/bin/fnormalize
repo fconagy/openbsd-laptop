@@ -1,0 +1,91 @@
+#!/bin/sh
+
+# Normalize file names.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script renames all files with accented characters
+in their name with the corresponding unaccented ones.
+Also replaces blanks with underscores and other special
+characters.
+Usage:
+    fnormalize [directory]
+where
+    directory           is the directory to process.
+                        The default is the current one.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Directory to process.
+DIR=${1-.}
+if [ ! -e $DIR ]
+then
+	echo "Cannot find $DIR"
+	exit $FAILURE
+fi
+if [ ! -d $DIR ]
+then
+	echo "$DIR is not a directory"
+	exit $FAILURE
+fi
+
+# All files.
+find $DIR -type f -print | while read F
+do
+
+	# Replace blanks with underscores. Repeated blanks with only
+	# one underscore.
+	FF="`echo \"${F}\" | tr ' ' '_'`"
+	FF="`echo $FF | sed 's/_[_]*/_/g'`"
+
+	# Translate file name. Hungarian.
+	FF="`echo $FF | tr 'öüóéáúűíÖÜÓÉÁÚŰÍ' 'ouoeauuiOUOEAUUI'`"
+
+	# Also Swedish.
+	FF="`echo $FF | tr 'äåÄÅ' 'aaAA'`"
+
+    # Others.
+	FF="`echo $FF | tr 'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ' 'AAAAAAACEEEEIIIIDNOOOOOOUUUUYDSaaaaaaaceeeeiiiidnoooooouuuuydy'`"
+
+	# Also remove some spec characters.
+	FF="`echo \"${FF}\" | tr -d '\(\)\+\&\!\?\,\#\[\]\{\}\$\^\%\<\>\@\*'`"
+
+	# Lower case.
+	FF="`echo $FF | awk ' { print tolower($0) } '`"
+
+	# Hyphenize.
+	FF="`echo $FF | tr '_' '-'`"
+
+	# Repeated minuses transformed into just one.
+	FF="`echo $FF | sed 's/-[-]*/-/g'`"
+
+	# Rename the file.
+	if [ "$F" != "$FF" ]
+	then
+
+		# Modified.
+		if [ -r $FF ]
+		then
+			echo "$FF already exists"
+			exit $FAILURE
+		fi
+		mv "$F" "$FF"
+		if [ $? -ne 0 ]
+		then
+			echo "Error renaming file $F"
+			exit $FAILURE
+		fi
+	fi
+done
+
+# Finish.
+exit $SUCCESS
+

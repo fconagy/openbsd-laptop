@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Start xdm with DisplayLink + Intel.
+
+# Display manager executable.
+XDM=/usr/X11R6/bin/xenodm
+
+# Start with Intel config on the first screen.
+$XDM
+sleep 10
+
+# Change Xservers to second screen.
+cp /etc/X11/xorg.conf.displaylink /etc/X11/xorg.conf
+cp /etc/X11/xenodm/Xservers.1 /etc/X11/xenodm/Xservers
+$XDM
+sleep 5
+
+# Restore the original state.
+rm /etc/X11/xorg.conf
+cp /etc/X11/xenodm/Xservers.0 /etc/X11/xenodm/Xservers
+

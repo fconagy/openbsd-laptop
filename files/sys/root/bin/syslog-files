@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# Make sure we got all syslog files to write to.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script attempts to create the log files the
+syslog config file refers to.
+Usage
+    syslog-files
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Go through the syslog conf file and get the file names.
+CNF=/etc/syslog.conf
+if [ ! -r $CNF ]
+then
+	echo "Cannot find syslog config file $CNF"
+	exit $FAILURE
+fi
+cat $CNF | grep '/var/log/' | egrep -v -e '^#' | \
+	awk ' { print $2 } ' | while read F REST
+do
+	if [ ! -r $F ]
+	then
+		touch $F
+		if [ $? -ne 0 ]
+		then
+			echo "$F create failed"
+		fi
+		echo "$F created"
+	else
+		echo "$F in place"
+	fi
+done
+
+# Finish.
+exit $SUCCESS
+

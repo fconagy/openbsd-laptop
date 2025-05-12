@@ -1,0 +1,89 @@
+.TH LOGIN_SEQ "8" "2022-07-14" "Sequence login style" "System Commands"
+
+.SH NAME
+login_seq \- Login using a sequence of login styles.
+
+.SH SYNOPSYS
+.B login_seq
+.B [ \-d ]
+.B [ \-s \fIservice\fP ]
+.B \fIuser\fP
+.B [ \fIclass\fP ]
+
+.SH DESCRIPTION
+This utility applies a sequence of login styles to authenticate the
+\fIuser\fR accordingly to \fIlogin.conf\fR termcap style entries.
+All items defined in the sequence should succeed for a successful
+authentication. So this implements an AND conjunction instead of the
+default OR.
+
+.TP
+.B \-d
+debug option to call the program outside from the login framework
+for command line testing.
+
+.TP
+.B \-s \fIservice\fR
+specifies which protocol to use with the invoking program.
+Only the \fIlogin\fR protocol is allowed.
+The program will prompt the user for a password and report back to the
+invoking program whether or not the authentication was successful.
+
+.TP
+.B \fIuser\fR
+is the login name of the user to be authenticated.
+
+.TP
+Config file \fBlogin.conf\fR should have similar entries like shown below:
+.EX
+
+sequence:\\
+    :auth=seq,passwd:\\
+    :styles=passwd,passwd:\\
+    :prompts=Enter password\\072 ,Enter password\\072 :
+
+# Default styles.
+auth-seq-defaults:\\
+    :auth-seq=seq:
+
+# User with sequence specified above.
+user:\\
+    :path=/usr/bin /bin /usr/sbin /sbin /usr/X11R6/bin /usr/local/bin /usr/local/sbin:\\
+    :umask=022:\\
+    :datasize-max=1024M:\\
+    :datasize-cur=1024M:\\
+    :maxproc-max=256:\\
+    :maxproc-cur=128:\\
+    :openfiles-max=1024:\\
+    :openfiles-cur=512:\\
+    :stacksize-cur=4M:\\
+    :localcipher=blowfish,a:\\
+    :auth=seq:
+.EE
+
+.PP
+In the \fIsequence\fR stanza we define the class \fIsequence\fR, which then in turn
+can be referred in the \fB/etc/master.passd\fR file as the field after the primary group
+field for the user. Extra capabilities can also be defined here.
+The termcap like string \fIauth\fR defines the allowed authentication styles.
+The \fIstyles\fR string defines the sequence of authentication styles separated by commas.
+The \fIprompts\fR string has the corresponding prompt items. Note that to include a
+colon in a termcap string you have to use \\072 .
+
+All authentication styles will be tried in sequence and all should succeed.
+
+The next stanza defines the default styles which can be referred with a
+\fB:tc=auth-seq-defaults:\fR item.
+
+The user definition then can have an item \fB:auth=seq:\fR.
+
+Make sure that you ran the database generator for login.conf
+when there is a db file so it is in use.
+
+.SH SEE ALSO
+.BR login (1),
+.BR passwd (1),
+.BR su (1),
+.BR login.conf (5),
+.BR ftpd (8)
+ 

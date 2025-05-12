@@ -1,0 +1,172 @@
+#!/bin/sh
+
+# Just print.
+# An extremely simple print daemon, scanning the
+# spool directory and printing what he finds there.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# PID file.
+PIDF="/var/run/printd.pid"
+
+# Spool directory.
+SPOOL=/var/spool/output/print
+
+# Get timestamp.
+stamp() {
+	date +%Y-%d-%mT%H:%M:%S
+}
+
+log() {
+	echo "`stamp` $*"
+}
+
+# Daemonize.
+case "${1}" in
+-h|--help|-help)
+	cat <<!EOF
+This script is a simple print daemon.
+If you put a file under the spool directory
+/var/spool/output/print will try to print it
+on the locally connected PostScript printer.
+Usage:
+    printd [-d][-k]
+where
+    -d      debug, stay in the foreground
+    -k      kill running printd.
+!EOF
+	exit $FAILURE
+	;;
+"")
+
+	# Default, go to the background.
+	nohup $0 -d >>/var/log/printd.log 2>&1 &
+	exit $SUCCESS
+	;;
+-d|--debug|-debug)
+
+	# Stay in foreground.
+	shift
+	;;
+-k|--kill|-kill)
+
+	# Kill runnig daemon.
+	if [ ! -r $PIDF ]
+	then
+		log "Cannot find PID file $PIDF - check"
+		exit $FAILURE
+	fi
+	/bin/kill "`/bin/cat $PIDF`"
+	exit $SUCCESS
+	;;
+-l|--list|-list)
+
+	# List runnig daemon.
+	if [ `id -u` != 0 ]
+	then
+		echo "Must be root"
+		exit $FAILURE
+	fi
+	if [ ! -r $PIDF ]
+	then
+		log "Cannot find PID file $PIDF - check"
+		exit $FAILURE
+	fi
+	/bin/ps "`/bin/cat $PIDF`"
+	echo "SPOOL $SPOOL"
+	cd $SPOOL
+	/bin/ls -l
+	exit $SUCCESS
+	;;
+esac
+
+# Trap.
+trap "log 'Exiting'; /bin/rm -f $PIDF; exit 0" 1 2 3 15
+
+# Check spool directory.
+if [ ! -d $SPOOL ]
+then
+	mkdir -p $SPOOL
+	chmod uog+rwx $SPOOL
+	chmod +t $SPOOL
+	log "Created $SPOOL"
+fi
+if [ `/usr/bin/stat $SPOOL | /usr/bin/awk ' { print $3 } '` != drwxrwxrwt ]
+then
+	log "Wrong permissions on $SPOOL"
+	exit $FAILURE
+fi
+
+# Printer device.
+DEV=/dev/ulpt0
+if [ ! -c $DEV ]
+then
+	log "Problem with device $DEV"
+	exit $FAILURE
+fi
+
+# Create PID file.
+if [ -r $PIDF ]
+then
+	log "PID file $PIDF already exists"
+	log "Kill running daemon and/or remove file"
+	exit $FAILURE
+else
+	echo "$$" >$PIDF
+fi
+
+# Check for files to print in the spool.
+log "Starting up"
+cd $SPOOL
+if [ $? -ne 0 ]
+then
+	log "Cannot cd $SPOOL - confused"
+	exit $FAILURE
+fi
+while true
+do
+	find . -type f -print | \
+		while read F
+	do
+
+		# Check.
+		case "${F}" in
+		*[!-_a-zA-Z0-9]*)
+			log "Alien characters in file name"
+			exit $FAILURE
+			;;
+		esac
+		LEN="`/bin/echo \"${F}\" | /usr/bin/awk ' { print length($0) } '`"
+		if [ $LEN -gt 128 ]
+		then
+			log "Filename too long"
+			exit $FAILURE
+		fi
+		log "Printing ${F}"
+		/bin/cp "${F}" "${DEV}"
+		if [ $? -ne 0 ]
+		then
+			log "Copy failed for ${F}"
+			exit $FAILURE
+		fi
+		/bin/rm "${F}"
+		if [ $? -ne 0 ]
+		then
+			log "Remove failed for ${F}"
+			exit $FAILURE
+		fi
+		log "Finished ${F}"
+	done
+	if [ $? -ne 0 ]
+	then
+		log "Exiting on error at ${F}"
+		exit $?
+	fi
+	sleep 3
+done
+
+# Exit, never reached.
+exit $SUCCESS
+

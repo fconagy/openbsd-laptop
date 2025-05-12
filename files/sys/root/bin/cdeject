@@ -1,0 +1,68 @@
+#!/bin/sh
+
+# Eject CD/DVD.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help)
+	/bin/cat <<!EOF
+Eject CDROM/DVD.
+Usage:
+    cdeject [cd]
+where
+    cd          is the drive like cd0 or cd1.
+The default is cd0.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Device.
+case "${1}" in
+/*)
+	echo "Specify just device name like cd0"
+	exit $FAILURE
+	;;
+cd0|cd1)
+	CD="${1}"
+	;;
+"")
+	CD="cd0"
+	;;
+*)
+	echo "Invalid device name, use cd0 or cd1"
+	exit $FAILURE
+	;;
+esac
+
+# Got the device.
+DEV="/dev/${CD}c"
+MOUNTDEV="/dev/${CD}a"
+if [ ! -b "$DEV" ]
+then
+	echo "Cannot access CD drive"
+	exit $FAILURE
+fi
+
+# Check.
+if /sbin/mount | /usr/bin/grep "^${MOUNTDEV} " >/dev/null 2>&1
+then
+	echo "The CD drive is mounted"
+	exit $FAILURE
+fi
+
+# Eject.
+/bin/eject "${DEV}"
+if [ $? -ne 0 ]
+then
+	echo "Error ejecting CD/DVD"
+	exit $FAILURE
+fi
+
+# Success.
+exit $SUCCESS
+

@@ -1,0 +1,48 @@
+.TH YRND "8" "2022-06-17" "Yubikey random numbers" "System Commands"
+
+.SH NAME
+yrnd \- Yubikey random numbers
+
+.SH SYNOPSYS
+.B yrnd
+.B [ \-b ]
+.B [ \-n \fIn\fP ]
+.B [ \-v ]
+.B [ \-h ]
+
+.SH DESCRIPTION
+This is a small utility program which will use APDU commands
+to talk to the Yubikey and obtains random numbers from
+the Yubikey internal random number generator.
+
+The PCSCLITE library is used and the program is a re-work of
+the demo program for that library.
+
+It uses the GENERAL AUTHENTICATE REQUESTING CHALLENGE command
+which returns 8 bytes of randomness.
+
+The documentation states that
+"The standard YubiKey has a built-in random number generator that involves
+a Linear Feedback Shift Register (LFSR) that is fed from analog output of the
+touch sensor as well as asynchronous data from USB traffic."
+
+.TP
+.B \-b
+binary output, just the random bytes. The default
+is to print bytes in hex.
+
+.TP
+.B \-n \fIn\fR
+how many random bytes to obtain. The default is 8 which is
+the output of one APDU command. The maximum is 65537.
+
+.TP
+.B \-v
+verbose, print the name of the card which will be used.
+
+.TP
+.B \-h
+print this help.
+
+.RE
+

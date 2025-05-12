@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# Right arrow on keyboard.
+
+# Delay.
+D=2
+
+# Exit.
+trap 'hw ledstate 0 >/dev/null; exit 0' 1 2 3 15
+
+# Blinkenlights.
+while true
+do
+	hw ledstate 2 >/dev/null
+	sleep $D
+	hw ledstate 1 >/dev/null
+	sleep $D
+	hw ledstate 4 >/dev/null
+	sleep $D
+	hw ledstate 6 >/dev/null
+	sleep $D
+	hw ledstate 5 >/dev/null
+	sleep $D
+	hw ledstate 7 >/dev/null
+	sleep $D
+	hw ledstate 0 >/dev/null
+	sleep $D
+done
+

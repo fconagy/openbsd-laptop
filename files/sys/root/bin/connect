@@ -1,0 +1,1104 @@
+#!/bin/sh
+
+# Connect to network.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help|help)
+	/bin/cat <<!EOF
+This script connects to a network.
+Usage:
+    connect [-h|-l|-w|-b|-i][-v|-d][networkname]
+where
+    -h              prints this help.
+    -l              list locations
+    -w              list visible WiFi SSIDs.
+    -b              print best match interface name.
+    -i              show interfaces with ifconfig.
+    -u              show interfaces which are up.
+    -v              verbose.
+    -d              debug.
+    networkname     is the name of the network to connect to.
+                    Typically it is the location, like office or home.
+The script has a config file ../etc/connnect.conf.
+It should look like:
+[home]
+    type=ethernet
+    interface=ethernet
+    address=192.168.1.10
+    netmask=255.255.255.0
+    gateway=192.168.1.1
+    domain=local
+    ns1=192.168.1.1
+    ns2=192.168.1.1
+
+[wifi]
+    type=wifi
+    interface=wifi
+    nwid="ssid"
+    password="password"
+
+Applicable types are 'ethernet', 'wifi', 'dhcp', 'wpas'.
+Type 'dhcp' will try to acquire configuration via dhcp.
+Type 'wpas' which will try to connect using wpa_supplicant,
+which would be required for WPA-EAP networks. This does not work.
+There is 'publicwifi' for open networks.
+
+The 'interface' keyword takes generic specifiers which can be
+'wifi' or 'ethernet', in which case will try to find the best
+matching connected interface.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+if [ `/usr/bin/id -u` != 0 ]
+then
+	echo "You have to run this script as root"
+	exit $FAILURE
+fi
+
+# Config files.
+CONFDIR="`dirname $0`/../etc"
+if [ ! -d $CONFDIR ]
+then
+	echo "Cannot find config directory $CONFDIR"
+	exit $FAILURE
+fi
+CONF="$CONFDIR/connect.conf"
+if [ ! -r $CONF ]
+then
+	echo "Cannot find config file $CONF"
+	exit $FAILURE
+fi
+SCRIPT=$CONFDIR/connect.script
+PLACEFILE=$CONFDIR/connect.place
+NAMEFILE=$CONFDIR/connect.name
+INTERFILE=$CONFDIR/connect.interface
+
+# Accessory script.
+BINDIR="`dirname $0`/../bin"
+if [ ! -d $BINDIR ]
+then
+	echo "Cannot find directory $BINDIR"
+	exit $FAILURE
+fi
+DISCONNECT=$BINDIR/disconnect
+if [ ! -x $DISCONNECT ]
+then
+	echo "Cannot find disconnect script $DISCONNECT"
+	exit $FAILURE
+fi
+
+# WPA supplicant files and logs.
+WPASPID=$CONFDIR/wpas.pid
+WPASENT=$CONFDIR/wpas.entropy
+WLOG=/var/log/wpa-supplicant.log
+DLOG=/var/log/dhcp-client.log
+LEASELOG=/var/log/dhcpleasectl.log
+rm -f $WPASPID $WLOG $DLOG $LEASELOG
+
+# Report.
+
+rep() {
+
+	# Report.
+	/usr/bin/printf "%15s: %s\n" "Name" "$name"
+	/usr/bin/printf "%15s: %s\n" "Type" "$type"
+	/usr/bin/printf "%15s: %s\n" "Interface" "$interface"
+	/usr/bin/printf "%15s: %s\n" "Address" "$address"
+	/usr/bin/printf "%15s: %s\n" "Netmask" "$netmask"
+	/usr/bin/printf "%15s: %s\n" "Gateway" "$gateway"
+	if [ "$5" != "" ]
+	then
+		/usr/bin/printf "%15s: %s\n" "Domain" "$domain"
+		/usr/bin/printf "%15s: %s\n" "NS1" "$ns1"
+		/usr/bin/printf "%15s: %s\n" "NS2" "$ns2"
+	fi
+	if [ "$nwid" != "" ]
+	then
+		/usr/bin/printf "%15s: %s\n" "Nwid" "$nwid"
+		/usr/bin/printf "%15s: %s\n" "Password" '********'
+	fi
+}
+
+# Configure the interface. Manual configuration.
+# Arguments: interface netmask gateway domain ns1 ns2
+
+iconf() {
+
+	# Check.
+	if [ "$4" = "" ]
+	then
+		echo "You have to specify at least four arguments to iconf"
+		exit $FAILURE
+	fi
+
+	# Configure.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Configuring $1 manually"
+	fi
+	/sbin/ifconfig $1 inet $2 netmask $3
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot configure interface $1"
+		exit $FAILURE
+	fi
+
+	# Default gateway and DNS config.
+	/sbin/route add default $4 >/dev/null 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot configure default gateway $4"
+		exit $FAILURE
+	fi
+	if [ "$5" != "" ]
+	then
+		if [ "$7" = "" ]
+		then
+			echo "You have to specify also ns1 and ns2 to iconf"
+			exit $FAILURE
+		fi
+		/bin/cat >/etc/resolv.conf <<!EOF
+search $5
+nameserver $6
+nameserver $7
+!EOF
+		if [ $? -ne 0 ]
+		then
+			echo "Failed to configure resolving - confused"
+			exit $FAILURE
+		fi
+	else
+
+		# No name server specified.
+		/bin/rm -f /etc/resolv.conf
+	fi
+
+	# Bring it up, maybe it was down.
+	/sbin/ifconfig $1 up
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot bring up interface $1"
+		exit $FAILURE
+	fi
+	if [ $VERBOSE = yes ]
+	then
+		echo "Connected $1 as $2 via $3"
+	fi
+	if [ $DEBUG = yes ]
+	then
+		rep
+	fi
+	if [ $VERBOSE = yes ]
+	then
+		echo "Pinging $4"
+	fi
+	sleep 1
+	COUNT=0
+	PING=no
+	while [ $COUNT -lt 5 ]
+	do
+		/sbin/ping -q -c 1 -w 1 $4 >/dev/null 2>&1
+		STATUS=$?
+		COUNT="`/bin/expr $COUNT + 1`"
+		if [ $STATUS -ne 0 ]
+		then
+			if [ $VERBOSE = yes ]
+			then
+				/usr/bin/printf "."
+			fi
+		else
+			PING=yes
+			if [ $VERBOSE = yes ]
+			then
+				/usr/bin/printf "!"
+			fi
+			break
+		fi
+	done
+	if [ $VERBOSE = yes ]
+	then
+		if [ $COUNT -gt 0 ]
+		then
+			/usr/bin/printf "\n"
+		fi
+	fi
+	if [ $PING != yes ]
+	then
+		echo "Cannot ping $4"
+		case $1 in
+		ure0)
+			echo "Note $1 has a bug, needs full restart after disconnect"
+			;;
+		esac
+	fi
+}
+
+# Report connection on an interface.
+# Arguments: interface.
+
+irep() {
+	if [ "$1" != "" ]
+	then
+		IPADDR="`/sbin/ifconfig $1 | /usr/bin/grep '[	 ]inet[	 ]' | /usr/bin/awk ' { print $2 } '`"
+		if [ "$IPADDR" = "" ]
+		then
+			echo "Does not seem to have an IP address"
+		else
+			echo "Connected via $1 as $IPADDR"
+		fi
+	else
+		echo "You have to specify interface name to irep"
+		exit $FAILURE
+	fi
+}
+
+# Try to find a suitable interface to connect to.
+# Arguments: none.
+
+bestmatch() {
+	/usr/bin/netstat -in | /usr/bin/egrep -v -e '^Name ' | /usr/bin/sed 's/\* / /' | \
+		while read NAME MTU NETWORK ADDRESS REST
+	do
+
+		# Interfaces, also include the ones which are down.
+		GROUP="`/sbin/ifconfig $NAME | /usr/bin/egrep -e 'groups: ' | /usr/bin/cut -d ' ' -f 2`"
+		if [ "$GROUP" = "" ]
+		then
+			GROUP="none"
+		fi
+		MEDIA="`/sbin/ifconfig $NAME | /usr/bin/egrep -e 'media: ' | /usr/bin/cut -d ' ' -f 2`"
+		if [ "$MEDIA" = "" ]
+		then
+			MEDIA="none"
+		fi
+		PRIORITY="`/sbin/ifconfig $NAME | /usr/bin/egrep -e 'priority ' | /usr/bin/cut -d ' ' -f 4`"
+		if [ "$PRIORITY" = "" ]
+		then
+			PRIORITY="255"
+		fi
+		case $MEDIA in
+		Ethernet|IEEE802.11)
+
+			# Only ethernet or WiFi.
+			if [ "$1" == "$MEDIA" ]
+			then
+
+				# Media is what we were asking for.
+				/usr/bin/printf "%8s %-8s %-12s %4d %-16s %s\n" \
+					"$NAME" "$GROUP" "$MEDIA" "$PRIORITY" "$NETWORK" "$ADDRESS"
+			elif [ "$1" = "" -o "$1" = "any" ]
+			then
+
+				# Mediatype not specified. Print all.
+				/usr/bin/printf "%8s %-8s %-12s %4d %-16s %s\n" \
+					"$NAME" "$GROUP" "$MEDIA" "$PRIORITY" "$NETWORK" "$ADDRESS"
+			fi
+		esac
+	done | /usr/bin/sort -b -k 4n -k 1d -k 2d -k 3d | \
+		while read NAME GROUP MEDIA PRIORITY NETWORK ADDRESS
+	do
+
+		# Get the highest priority one.
+		echo "$NAME"
+	done | /usr/bin/head -1
+}
+
+# Initiate DHCP connection.
+# Arguments: interface
+
+dhcpconfig() {
+	MAXATTEMPTS=40
+	if [ "$1" = "" ]
+	then
+		echo "Specify interface"
+		exit $FAILURE
+	fi
+	# This is being phased out.
+	#DHCP=dhclient
+	#DHCPDARGS="-v -d $1"
+	#DHCPARGS="$1"
+	DHCP=dhcpleased
+	DHCPDARGS="-d -v -v -v"
+	DHCPARGS=""
+
+	# Kill if it was running.
+	if /usr/bin/pgrep -x $DHCP >/dev/null 2>&1
+	then
+		echo "Killing $DHCP"
+		/usr/bin/pkill -x $DHCP
+		/bin/sleep 1
+	fi
+
+	# Run dhcp.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Trying to acquire DHCP config"
+	fi
+	if [ "$DHCP" = "dhcpleased" ]
+	then
+
+		# Daemon dhcpleased expects autoconf.
+		/sbin/ifconfig "${1}" autoconf
+		if [ $? -ne 0 ]
+		then
+			echo "Running ifconfig autoconf failed"
+			exit $FAILURE
+		fi
+	fi
+
+	# Start DHCP daemon.
+	if [ $DEBUG = yes ]
+	then
+		/sbin/$DHCP $DHCPDARGS &
+		STATUS=$?
+	else
+		/sbin/$DHCP $DHCPARGS >$DLOG 2>&1
+		STATUS=$?
+	fi
+	if [ $STATUS -ne 0 ]
+	then
+		echo "Cannot obtain DHCP config for ${1}"
+		if [ -r $DLOG ]
+		then
+			/bin/cat $DLOG
+		fi
+		echo "Killing $DHCP"
+		/usr/bin/pkill -x $DHCP
+		/bin/sleep 1
+		exit $FAILURE
+	else
+		sleep 2
+	fi
+
+	# Ask for a lease.
+	if [ "$DHCP" = "dhcpleased" ]
+	then
+		/usr/sbin/dhcpleasectl $1 >$LEASELOG 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Error running dhcpleasectl"
+			/bin/cat $LEASELOG
+			echo "Killing $DHCP"
+			/usr/bin/pkill -x $DHCP
+			/bin/sleep 1
+			exit $FAILURE
+		fi
+	fi
+
+	# Wait until it comes up.
+	CONFIGURED=no
+	ATTEMPTS=0
+	DOTS=no
+	/bin/sleep 1
+	while [ $CONFIGURED != yes ]
+	do
+		if [ $VERBOSE = yes ]
+		then
+			DOTS=yes
+			/usr/bin/printf "."
+		fi
+		DHCPADDR="`/sbin/ifconfig $1 | grep inet | awk ' { print $2 } '`"
+		if [ "$DHCPADDR" != "" ]
+		then
+
+			# Got address.
+			CONFIGURED=yes
+			if [ $VERBOSE = yes ]
+			then
+				DOTS=yes
+				/usr/bin/printf "!"
+			fi
+		fi
+
+		# The last one did succeed,
+		if [ $CONFIGURED = yes ]
+		then
+			:
+		else
+			ATTEMPTS="`expr $ATTEMPTS + 1`"
+			if [ $ATTEMPTS -gt $MAXATTEMPTS ]
+			then
+
+				# Might take long time.
+				if [ $DOTS = yes ]
+				then
+					/usr/bin/printf "\n"
+				fi
+				echo "Interface ${1} not coming up"
+				echo "Killing $DHCP"
+				/usr/bin/pkill -x $DHCP
+				/bin/sleep 1
+				exit $FAILURE
+			fi
+		fi
+		/bin/sleep 1
+	done
+	if [ $VERBOSE = yes ]
+	then
+		if [ $DOTS = yes ]
+		then
+			/usr/bin/printf "\n"
+		fi
+	fi
+
+	# Get DNS addresses into resov.conf.
+	RCONF=/etc/resolv.conf
+	if [ "$DHCP" = "dhcpleased" ]
+	then
+
+		# Daemon dhcpleased does resolv.conf in tandem with resolvd.
+		# We don't have that so we do it manually.
+		if [ $VERBOSE = yes ]
+		then
+			echo "Gather name server addresses"
+		fi
+		DNS="`/usr/sbin/dhcpleasectl -l $1 2>/dev/null | grep nameservers | awk ' { print $2, $3 } '`"
+		if [ "$DNS" = "" ]
+		then
+			echo "Error getting DNS addresses"
+			echo "Killing $DHCP"
+			/usr/bin/pkill -x $DHCP
+			/bin/sleep 1
+			exit $FAILURE
+		else
+			rm -f $RCONF
+			for NSADDR in $DNS
+			do
+				echo "nameserver $NSADDR" >>$RCONF
+			done
+		fi
+	fi
+
+	# Report.
+	if [ $DEBUG = yes ]
+	then
+		if [ -r $RCONF ]
+		then
+			cat $RCONF
+		fi
+		/sbin/ifconfig $1
+	fi
+	if [ $VERBOSE = yes ]
+	then
+		irep $1
+		echo "Nameservers are $DNS"
+	fi
+}
+
+# Use wpa_supplicant to configure WiFi.
+
+wpasconfig() {
+	if [ "$1" = "" ]
+	then
+		echo "Specify interface"
+		exit $FAILURE
+	fi
+
+	# Kill if it was running.
+	if /usr/bin/pgrep -x wpa_supplicant >/dev/null 2>&1
+	then
+		echo "Killing wpa_supplicant"
+		/usr/bin/pkill -x wpa_supplicant
+		/bin/sleep 1
+	fi
+	if /usr/bin/pgrep -x dhclient >/dev/null 2>&1
+	then
+		echo "Killing dhclient"
+		/usr/bin/pkill -x dhclient
+		/bin/sleep 1
+	fi
+
+	# Check.
+	if [ "$nwid" = "" ]
+	then
+		echo "Station ID is not defined"
+		exit $FAILURE
+	fi
+	if [ "$interface" = "" ]
+	then
+		echo "Interface not defined"
+		exit $FAILURE
+	fi
+
+	# Get base station address.
+	/sbin/ifconfig $1 up
+	/bin/sleep 7
+	BSSID="`/sbin/ifconfig $1 scan | /usr/bin/grep chan | \
+		/usr/bin/grep bssid | grep " ${nwid} " | head -1 | \
+		/usr/bin/awk ' { print $6 } '`"
+	if [ "$BSSID" = "" ]
+	then
+		echo "Cannot get BSSID for ${nwid} - possibly not present"
+		exit $FAILURE
+	fi
+
+	# Interface config as described in the README for wpa_supplicant.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Trying to connect to nwid ${nwid} bssid ${BSSID}"
+	fi
+	# Not sure if BSSID needed.
+	#/sbin/ifconfig $1 nwid "$nwid" bssid "${BSSID}" wpa wpaakms 802.1x up
+	/sbin/ifconfig $1 nwid "$nwid" wpa wpaakms 802.1x up
+	/bin/sleep 5
+	if [ $? -ne 0 ]
+	then
+		echo "Error configuring interface"
+		exit $FAILURE
+	fi
+
+	# Start wpa supplicant.
+	if [ $VERBOSE = yes ]
+	then
+		echo "Starting wpa_supplicant on $1"
+	fi
+	if [ $DEBUG = yes ]
+	then
+		ifconfig $1 debug
+		/usr/local/sbin/wpa_supplicant -D openbsd -ddd -i $1 \
+			-c /etc/wpa_supplicant.conf -P $WPASPID &
+		STATUS=$?
+	else
+		/usr/local/sbin/wpa_supplicant -D openbsd -s -B -i $1 \
+			-c /etc/wpa_supplicant.conf -P $WPASPID -e $WPASENT >$WLOG 2>&1
+		STATUS=$?
+	fi
+	/bin/sleep 1
+	if [ $DEBUG = yes ]
+	then
+		echo "Status was $STATUS"
+	fi
+	if [ $STATUS -ne 0 ]
+	then
+		echo "Error trying to connect to wifi via $1"
+		if [ -r $WLOG ]
+		then
+			cat $WLOG
+		fi
+
+		# Cleanup.
+		if /usr/bin/pgrep -x wpa_supplicant >/dev/null 2>&1
+		then
+			echo "Killing wpa_supplicant"
+			/usr/bin/pkill -x wpa_supplicant
+			/bin/sleep 1
+		fi
+		exit $FAILURE
+	fi
+
+	# Report.
+	if [ $VERBOSE = yes ]
+	then
+		echo "WPA supplicant running on $1"
+	fi
+	if [ $DEBUG = yes ]
+	then
+		/sbin/ifconfig $1
+	fi
+}
+
+# Bring up WiFi interface.
+# You have to call dhcpconfig afterwards.
+# Arguments: interface nwid password
+wifup() {
+	if [ "$1" = "" -o "$2" = "" ]
+	then
+		echo "Specify interface, nwid, wpakey"
+		exit $FAILURE
+	fi
+
+	# No need "help" from wpa_supplicant. Kill if it is running.
+	if /usr/bin/pgrep -x wpa_supplicant >/dev/null 2>&1
+	then
+		echo "Killing wpa_supplicant"
+		/usr/bin/pkill -x wpa_supplicant
+		/bin/sleep 1
+	fi
+
+	# Configure and up.
+	if [ "$3" != "" ]
+	then
+		/sbin/ifconfig $1 nwid "$2" wpakey "$3"
+		if [ $? -ne 0 ]
+		then
+			echo "Error running ifconfig"
+			exit $FAILURE
+		fi
+	else
+
+		# No password.
+		/sbin/ifconfig $1 nwid "$2"
+		if [ $? -ne 0 ]
+		then
+			echo "Error running ifconfig"
+			exit $FAILURE
+		fi
+	fi
+	/sbin/ifconfig $1 up
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot bring interface up - confused"
+		exit $FAILURE
+	fi
+	if [ $DEBUG = yes ]
+	then
+		/sbin/ifconfig $1
+	fi
+}
+
+# Process command line switches.
+VERBOSE=no
+DEBUG=no
+CMD=connect
+ARG=""
+ARGC=0
+while [ "${1}" != "" ]
+do
+
+	# Check.
+	case "${1}" in
+	*[!-_a-zA-Z0-9]*)
+		echo "Alien characters in argument"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`/bin/echo \"${1}\" | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Too long"
+		exit $FAILURE
+	fi
+	if [ $ARGC -gt 8 ]
+	then
+		echo "Too many arguments"
+		exit $FAILURE
+	fi
+	ARGC="`/bin/expr $ARGC + 1`"
+
+	# Switch.
+	case "${1}" in
+	-v|--verbose|-verbose)
+		VERBOSE=yes
+		shift
+		;;
+	-d|--debug|-debug)
+		VERBOSE=yes
+		DEBUG=yes
+		shift
+		;;
+	-l|--list|-list|list)
+		CMD=list
+		shift
+		;;
+	-w|--wifilist|-wifilist|wifilist)
+		CMD=wifilist
+		shift
+		;;
+	-b|--best|-best|best)
+		CMD=best
+		shift
+		;;
+	-i|--if|-if|if)
+		CMD=ifconfig
+		shift
+		;;
+	-u|--up|-up|up)
+		CMD=up
+		shift
+		;;
+	-*|--*)
+		echo "Unknown switch"
+		exit $FAILURE
+		;;
+	*)
+
+		# Network name. We take the last one.
+		ARG="${1}"
+		shift
+		;;
+	esac
+done
+
+# Network name.
+N="${ARG}"
+case "${N}" in
+-*)
+	echo "Name starts with minus - confused"
+	exit $FAILURE
+	;;
+*[!-_a-zA-Z0-9]*)
+	echo "Alien characters in argument"
+	exit $FAILURE
+	;;
+esac
+LEN="`/bin/echo \"${N}\" | /usr/bin/awk ' { print length($0) } '`"
+if [ $LEN -gt 32 ]
+then
+	echo "Network name too long"
+	exit $FAILURE
+fi
+
+# Do command.
+case "${CMD}" in
+list)
+
+	# List locations.
+	/bin/cat $CONF | while read LINE REST
+	do
+		case $LINE in
+		\[*\])
+
+			# Place name.
+			PLACE="`/bin/echo \"$LINE\" | /usr/bin/sed 's/\[//; s/\]//'`"
+			echo "$PLACE"
+			;;
+		esac
+	done
+	;;
+
+wifilist)
+
+	# List available wifi networks.
+	INT="`bestmatch IEEE802.11`"
+	if [ "$INT" = "" ]
+	then
+		echo "No WiFi interface"
+		exit $FAILURE
+	fi
+	echo "Scanning $INT"
+	/sbin/ifconfig $INT up
+
+	# Have to wait until it gathers SSIDs.
+	/bin/sleep 7
+
+	# Scan.
+	if [ "$VERBOSE" = "yes" ]
+	then
+		/sbin/ifconfig $INT scan | /usr/bin/grep bssid | sort -u
+	else
+		/sbin/ifconfig $INT scan | /usr/bin/grep bssid | sed 's/^.*nwid //; s/ chan.*$//' | \
+			/usr/bin/awk ' { print substr($0,1,34) } ' | /usr/bin/sort -u
+	fi
+
+	# Quit here.
+	/sbin/ifconfig $INT down
+	;;
+best)
+
+	# Print best.
+	bestmatch any
+	;;
+ifconfig)
+
+	# Show interfaces.
+	/usr/bin/netstat -in | /usr/bin/egrep -v -e '\*|^lo0|^enc0|^pflog0|Name' | \
+		/usr/bin/awk ' { print $1 } ' | /usr/bin/sort -u | while read I REST
+	do
+		STATUS="`/sbin/ifconfig \"${I}\" | /usr/bin/grep '[	 ]status:[	 ]' | /usr/bin/awk ' { print $2 } '`"
+		MEDIA="`/sbin/ifconfig \"${I}\" | /usr/bin/grep '[	 ]media:[	 ]' | /usr/bin/awk ' { print $2 } '`"
+		ADDR="`/sbin/ifconfig \"${I}\" | /usr/bin/grep '[	 ]inet[	 ]' | /usr/bin/awk ' { print $2 } '`"
+		/usr/bin/printf "%-5s %-6s %-16s %s\n" "${I}" "${STATUS}" "${MEDIA}" "${ADDR}"
+	done
+	;;
+up)
+
+	# Show interfaces which are up.
+	/usr/bin/netstat -in | /usr/bin/egrep -v -e '\*|^lo0|^enc0|^pflog0|Name' | \
+		/usr/bin/awk ' { print $1 } ' | /usr/bin/sort -u | while read I REST
+	do
+		echo "${I}"
+	done
+	;;
+connect)
+
+	# Check.
+	case "${N}" in
+	"")
+
+		# No network name, try the last connected interface and finish.
+		if [ -r $INTERFILE ]
+		then
+			IF="`/bin/cat $INTERFILE`"
+			if [ "$IF" != "" ]
+			then
+				/sbin/ifconfig $IF up
+				if [ $VERBOSE = yes ]
+				then
+					echo "$IF coming up acquiring gateway"
+				fi
+				GW=""
+				NR=0
+				GW="`/usr/bin/netstat -rn | /usr/bin/grep ^default | /usr/bin/awk ' { print $2 } '`"
+				while [ "$GW" = "" ]
+				do
+					if [ $NR -gt 10 ]
+					then
+						if [ $VERBOSE = yes ]
+						then
+							echo "\n"
+						fi
+						echo "Gateway not found"
+						exit $FAILURE
+					fi
+					if [ $VERBOSE = yes ]
+					then
+						/usr/bin/printf "."
+					fi
+					/bin/sleep 1
+					GW="`/usr/bin/netstat -rn | /usr/bin/grep ^default | /usr/bin/awk ' { print $2 } '`"
+					NR="`expr $NR + 1`"
+				done
+				if [ "$GW" != "" ]
+				then
+
+					# Came up, has gateway.
+					if [ $VERBOSE = yes ]
+					then
+						/usr/bin/printf "!"
+						/usr/bin/printf "\n"
+					fi
+					/bin/sleep 1
+				else
+					if [ $VERBOSE = yes ]
+					then
+						/usr/bin/printf "\n"
+					fi
+					echo "No default gateway - giving up"
+					exit $FAILURE
+				fi
+				if [ $DEBUG = yes ]
+				then
+					irep $IF
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					echo "Pinging $GW"
+				fi
+				/sbin/ping -q -c 1 -w 1 $GW >/dev/null 2>&1
+				if [ $? -ne 0 ]
+				then
+					echo "Cannot ping $GW"
+					case $IF in
+					ure0)
+						echo "Note that $IF has a bug and requires a full restart"
+						;;
+					esac
+					exit $FAILURE
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					irep $IF
+				fi
+				exit $SUCCESS
+			else
+				echo "No saved interface"
+				exit $FAILURE
+			fi
+		else
+			echo "Cannot get last connected interface name"
+			exit $FAILURE
+		fi
+		;;
+	*)
+		;;
+	esac
+
+	# Start with blank slate.
+	rm -f $PLACEFILE $NAMEFILE
+
+	# Read from the config file.
+	cat $CONF | while read LINE REST
+	do
+
+		# We are inside the pipe so the we get
+		# the values out through a file.
+		case "${LINE}" in
+		\#|"")
+
+			# Comment.
+			;;
+		\[*\])
+
+			# Place name.
+			PLACE="`/bin/echo \"${LINE}\" | sed 's/\[//; s/\]//'`"
+			if [ "$PLACE" = "$N" ]
+			then
+
+				# Place name matched, remember the place.
+				if [ $VERBOSE = yes ]
+				then
+					echo "Found place $PLACE"
+				fi
+				echo "$PLACE" >$PLACEFILE
+				echo "$PLACE" >$NAMEFILE
+				echo "name=$PLACE" >$SCRIPT
+			else
+				rm -f $PLACEFILE
+			fi
+			;;
+		*)
+			if [ -r $PLACEFILE ]
+			then
+
+				# This is our place, build script to source.
+				echo "${LINE}" >>$SCRIPT
+			fi
+			;;
+		esac
+	done
+
+	# Check if we found a place name.
+	if [ ! -r $NAMEFILE ]
+	then
+		echo "Cannot find place $N"
+		exit $FAILURE
+	fi
+	#rm -f $NAMEFILE
+
+	# Check script.
+	if [ ! -r $SCRIPT ]
+	then
+		echo "Cannot find script file $SCRIPT - confused"
+		exit $FAILURE
+	fi
+
+	# Source config values.
+	name=""
+	type=""
+	exclusive=""
+	interface=""
+	address=""
+	netmask=""
+	gateway=""
+	nwid=""
+	password=""
+	. $SCRIPT
+
+	# Generic interfaces handled separately.
+	# Decide the interface.
+	best=""
+	case "$interface" in
+	ethernet)
+
+		# Ethernet interface we got.
+		best="`bestmatch Ethernet`"
+		;;
+	wifi)
+
+		# WiFi interface.
+		best="`bestmatch IEEE802.11`"
+		;;
+	any|"")
+
+		# Media type not specified.
+		best="`bestmatch any`"
+		;;
+	*)
+
+		# Would not match by generic type, take it literally.
+		best="$interface"
+		;;
+	esac
+	if [ "$best" = "" ]
+	then
+		echo "No suitable interface for $interface"
+		exit $FAILURE
+	fi
+	interface="$best"
+	if [ $DEBUG = yes ]
+	then
+		echo "Interface is $interface"
+	fi
+
+	# If exclusive disconnect all first.
+	if [ "$exclusive" = "yes" ]
+	then
+		if [ $DEBUG = yes ]
+		then
+			$DISCONNECT -d -a
+			SUCCESS=$?
+		else
+			$DISCONNECT -a
+			SUCCESS=$?
+		fi
+		if [ $SUCCESS -ne 0 ]
+		then
+			echo "Error disconnecting"
+			exit $FAILURE
+		fi
+	fi
+
+	# We got the interface.
+	# On interface type.
+	if [ $DEBUG = yes ]
+	then
+		echo "Interface type is $type"
+	fi
+	case "$type" in
+	dhcp)
+
+		# Just do a DHCP configuration.
+		dhcpconfig $interface
+		;;
+	ethernet|"")
+
+		# Ethernet, it is the default.
+		iconf $interface $address $netmask $gateway $domain $ns1 $ns2
+		;;
+	wifi)
+
+		# WiFi network.
+		wifup $interface "$nwid" "$password"
+		dhcpconfig $interface
+		;;
+	publicwifi)
+
+		# WiFi network.
+		wifup $interface "$nwid" "$password"
+		dhcpconfig $interface
+		;;
+	wpas)
+
+		# WiFi connection.
+		# Start wpa supplicant.
+		# Does not work.
+		#echo "WPA supplicant disabled for the time being due to issues"
+		#exit $FAILURE
+		wpasconfig $interface
+		dhcpconfig $interface
+		;;
+	usbtether)
+
+		# USB tethering via mobile phone.
+		TETHER=urndis0
+		if ifconfig $TETHER >/dev/null 2>&1
+		then
+			dhcpconfig $TETHER
+			if [ "$VERBOSE" = "yes" ]
+			then
+				echo "USB tethering enabled on $TETHER"
+			fi
+		fi
+		;;
+	*)
+
+		# No specific type.
+		echo "Unknown interface type"
+		exit $FAILURE
+		;;
+	esac
+	echo "$interface" >$INTERFILE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

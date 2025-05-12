@@ -1,0 +1,68 @@
+**Unused and no longer maintained**
+
+libfprint v0.5.0 with Authentec BSAPI Support
+=============================================
+
+This libfprint branch provides support for Authentec device like
+  Bus 001 Device 003: ID 147e:2020 Upek TouchChip Fingerprint Coprocessor (WBF advanced mode)
+using the Authentec BSAPI SDK.
+
+It works well on Fedora 18 and a Thinkpad T430.
+
+The upeke2 driver should support this device, but it doesn't work for
+me. Next step would be to use this driver and wireshark to understand
+what is wrong for upeke2.
+
+This driver doesn't fit well with libfprint design and don't support image grabbing.
+
+The freedesktop.org libfprint source code was cloned from http://cgit.freedesktop.org/libfprint/libfprint/
+(I don't know why my master branch interfere with https://github.com/anarsoul/libfprint)
+
+The BSAPI driver comes from https://gitorious.org/libfprint/fprint-bsapi-bridge, that 
+should be equivalent to https://github.com/hyperair/fprint-bsapi.
+
+run ./autogen.sh to generate configure script
+see run-configure.sh and run-install.sh to build and install
+see set-dev-permission.sh to setup permission
+
+libfprint
+=========
+
+libfprint is part of the fprint project:
+http://www.reactivated.net/fprint
+
+libfprint was originally developed as part of an academic project at the
+University of Manchester with the aim of hiding differences between different
+consumer fingerprint scanners and providing a single uniform API to application
+developers. The ultimate goal of the fprint project is to make fingerprint
+scanners widely and easily usable under common Linux environments.
+
+The academic university project runs off a codebase maintained separately
+from this one, although I try to keep them as similar as possible (I'm not
+hiding anything in the academic branch, it's just the open source release
+contains some commits excluded from the academic project).
+
+THE UNIVERSITY OF MANCHESTER DOES NOT ENDORSE THIS THIS SOFTWARE RELEASE AND
+IS IN NO WAY RESPONSIBLE FOR THE CODE CONTAINED WITHIN, OR ANY DAMAGES CAUSED
+BY USING OR DISTRIBUTING THE SOFTWARE. Development does not happen on
+university computers and the project is not hosted at the university either.
+
+For more information on libfprint, supported devices, API documentation, etc.,
+see the homepage:
+http://www.reactivated.net/fprint/Libfprint
+
+libfprint is licensed under the GNU LGPL version 2.1. See the COPYING file
+for the license text.
+
+Section 6 of the license states that for compiled works that use this
+library, such works must include libfprint copyright notices alongside the
+copyright notices for the other parts of the work. We have attempted to
+make this process slightly easier for you by grouping these all in one place:
+the AUTHORS file.
+
+libfprint includes code from NIST's NBIS software distribution:
+http://fingerprint.nist.gov/NBIS/index.html
+We include bozorth3 from the US export controlled distribution. We have
+determined that it is fine to ship bozorth3 in an open source project,
+see http://reactivated.net/fprint/wiki/US_export_control
+

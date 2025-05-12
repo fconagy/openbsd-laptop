@@ -1,0 +1,204 @@
+#!/bin/sh
+
+# Move newsyslog saved copies from under /var/log to /h/save/logs.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script saves newsyslog archived copies under /var/log
+to the save directory, /h/save/logs.
+Usage:
+    newsyslog-save [-n][-d]
+where
+    -n          dry run, just report.
+    -d          denumerize save directory after save.
+                Remove the .1., .2. etc from the filenames.
+    -f          fix when there is more than one date stamp
+                in the filename.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Save directory.
+SAVE=/h/save/logs
+if [ ! -d $SAVE ]
+then
+	echo "Cannot find save directory $SAVE"
+	exit $FAILURE
+fi
+
+# List of directories to check for log files to be saved.
+DIRLIST="/var/log /var/cron /var/www/logs"
+for D in $DIRLIST
+do
+	if [ ! -d $D ]
+	then
+		echo "Cannot find $D"
+		exit $FAILURE
+	fi
+done
+
+# Save file to save directory.
+
+savefile() {
+
+	# Process file in saved newsyslog format.
+	case $1 in
+	/var/log/Xorg.*)
+
+		# Skip the X startup log.
+		;;
+	*)
+
+		if [ -r $1 ]
+		then
+
+			# Get the name without the number.
+			NAME="`basename $1`"
+			NAME="`echo $NAME | sed 's/\.[0-9*]\.bz2//'`"
+
+			# Date timestamp of the original file.
+			STAMP="`stat -f '%Sm' -t '%Y-%m-%dT%H%M%S' $1`"
+
+			# Move the file.
+			case $1 in
+			*.bz2)
+				EXT=".bz2"
+				;;
+			*)
+				EXT=""
+				;;
+			esac
+
+			# New file name to be saved.
+			NFS="$SAVE/${NAME}.${STAMP}${EXT}"
+			if [ $DRYRUN = yes ]
+			then
+				echo "mv $1 $NFS"
+			else
+				mv $1 $NFS
+				if [ $? -ne 0 ]
+				then
+					echo "Error moving $1"
+					exit $FAILURE
+				else
+					echo $1 moved as $NFS
+				fi
+			fi
+		fi
+		;;
+	esac
+}
+
+# Options.
+DENUM=no
+DRYRUN=no
+FIX=no
+while [ "$1" != "" ]
+do
+	case $1 in
+	--denum|-d|-denum|denum)
+		shift
+		DENUM=yes
+		;;
+	--dryrun|-n|-dryrun|dryrun)
+		shift
+		DRYRUN=yes
+		;;
+	--fix|-f|-fix|fix)
+		shift
+		FIX=yes
+		;;
+	-*)
+		echo "Unknown option $1"
+		exit $FAILURE
+		;;
+	esac
+done
+
+# When fix just fix only.
+if [ $FIX = yes ]
+then
+	cd /h/save/logs
+	ls | while read F REST
+	do
+		NEWNAME="`echo $F | awk -F '.' ' { printf \"%s.%s.%s\n\", $1, $2, $3 } '`"
+		if [ -r $NEWNAME ]
+		then
+			echo "Cannot overwrite $NEWNAME"
+			exit $FAILURE
+		fi
+		mv $F $NEWNAME
+		if [ $? -ne 0 ]
+		then
+			echo "Error renaming $F"
+			exit $FAILURE
+		else
+			echo "$NEWNAME fixed"
+		fi
+	done
+
+	# And exit here.
+	exit $SUCCESS
+fi
+
+# All newsyslog archived files.
+for D in $DIRLIST
+do
+	for F in $D/*.[0-9*].* $D/*.[0-9*]
+	do
+		savefile $F
+	done
+done
+
+# Denumerize the save directory.
+if [ $DENUM = yes ]
+then
+	cd $SAVE
+	ls | while read F REST
+	do
+		case $F in
+		*\.[0-9]*\.*)
+
+			# Timestamp.
+			STAMP="`stat -f '%Sm' -t '%Y-%m-%dT%H%M%S' $F`"
+
+			# New file name.
+			FF="`echo $F | cut -d '.' -f 1,3-`.${STAMP}"
+
+			# Rename the file.
+			if [ -r $FF ]
+			then
+				echo "$FF already exists"
+			else
+
+				# Rename when not dry run.
+				if [ $DRYRUN = yes ]
+				then
+					echo "mv $F $FF"
+				else
+					if [ -e $FF ]
+					then
+						echo "$FD already exists"
+						exit $FAILURE
+					fi
+					mv $F $FF
+					if [ $? -ne 0 ]
+					then
+						echo "$F rename failed"
+					fi
+				fi
+			fi
+		esac
+	done
+fi
+
+# Finish.
+exit $SUCCESS
+

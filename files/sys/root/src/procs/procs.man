@@ -1,0 +1,32 @@
+.TH PROCS "8" "2022-06-21" "Print process info" "System Commands"
+
+.SH NAME
+procs \- Print process info
+
+.SH SYNOPSYS
+.B procs
+.B [ \-j ]
+.B [ \-k ]
+.B [ \-h ]
+
+.SH DESCRIPTION
+This is a small program which prints process information using
+the kvm interface.
+
+.TP
+.B \-j
+join output lines, the argv values will be printed joined
+after the immutable process name. Otherwise it will be printed
+one item a line underneath.
+
+.TP
+.B \-k
+kernel processes will be also printed. In this case the arguments
+cannot be presented.
+
+.TP
+.B \-h
+print this help.
+
+.RE
+

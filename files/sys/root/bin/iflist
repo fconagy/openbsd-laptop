@@ -1,0 +1,22 @@
+#!/bin/sh
+
+# Lists interfaces.
+
+netstat -in | awk ' { print $1 } ' | sed 's/\*//' | \
+	grep -v 'Name' | sort -u | while read IF REST
+do
+	GROUP="`ifconfig $IF | grep 'groups:' | awk ' { print $2 } '`"
+	INET="`ifconfig $IF | grep 'inet' | awk ' { print $2 } '`"
+	LLADDR="`ifconfig $IF | grep 'lladdr' | awk ' { print $2 } '`"
+	if [ "$LLADDR" = "" ]
+	then
+		LLADDR="none"
+	fi
+	if [ "$INET" != "" ]
+	then
+		LLADDR="$INET"
+	fi
+	STATUS="`ifconfig $IF | grep 'status:' | awk ' { print $2 $3 $4 $5 } '`"
+	printf "%12s %10s %18s %s\n" $GROUP $IF "$LLADDR" "$STATUS"
+done
+

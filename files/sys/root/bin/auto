@@ -1,0 +1,24 @@
+#!/bin/sh
+
+# Define environment variables for automake and autoconf.
+# This script should be source'd.
+
+AUTO="automake autoconf"
+for CMD in $AUTO
+do
+	EXEPATH="`which $CMD`"
+	EXEDIR="`dirname $EXEPATH`"
+	EXENAME="`basename $EXEPATH`"
+	if [ `ls $EXEDIR/${EXENAME}-* | wc -l` -ne 1 ]
+	then
+		echo "$EXENAME seems to have more than one versions"
+		exit 1
+	else
+		VERSION="`echo $EXEDIR/$EXENAME-* | sed 's/^.*\-//'`"
+	fi
+	VEXE="`echo $EXENAME | awk ' { print toupper($0) } '`"
+	VNAME="${VEXE}_VERSION"
+	echo "export $VNAME=\"$VERSION\""
+done
+exit 0
+

@@ -1,0 +1,84 @@
+#!/bin/ksh
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script is to switch on or off the cursor using ANSI
+esacpe sequences. Also can blank screen or run a kind
+of screen saver.
+Usage:
+    curs [on|off|blank|save]
+The default is cursor on.
+!EOF
+	exit $FALURE
+	;;
+esac
+
+# Cursor on and off delay in seconds.
+ONDELAY=5
+OFFDELAY=5
+
+# Get terminal rows and columns.
+if stty -a >/dev/null 2>&1
+then
+	:
+else
+	echo "Error accessing controlling terminal"
+	exit $FAILURE
+fi
+ROWS="`stty -a | grep rows | awk ' { print $4 } '`"
+COLS="`stty -a | grep columns | awk ' { print $6 } '`"
+
+case $1 in
+off)
+
+	# Cursor off.
+	echo -n '[?25l'
+	;;
+""|on)
+
+	# Cursor on.
+	echo -n '[?25h'
+	;;
+blank)
+
+	# Blank screen.
+	echo -n '[H[J[?25l'
+	read ANSWER
+	echo -n "[H[J[${ROWS};1H[?25h"
+	;;
+save)
+
+	# Screen saver.
+
+	# Put cursor at bottom of the screen on quit.
+	trap "echo -n \"[H[J[${ROWS};1H[?25h\"; exit $SUCCESS" 1 2 3 15
+
+	# Clear screen and switch off cursor.
+	echo -n '[H[J[?25l'
+	while true
+	do
+
+		# Flash cursor on at random position.
+		COL="`expr $RANDOM \* $COLS / 32767`"
+		ROW="`expr $RANDOM \* $ROWS / 32767`"
+		echo -n "[${ROW};${COL}H[?25h"
+		sleep $ONDELAY
+		echo -n '[?25l'
+		sleep $OFFDELAY
+	done
+	;;
+*)
+	echo "Unknown function"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

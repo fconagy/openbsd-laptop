@@ -1,0 +1,152 @@
+#!/bin/sh
+
+# Execute command using DVD.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Check device.
+if [ "${1}" != "" ]
+then
+	DEVICE="$1"
+	shift
+	case "${DEVICE}" in
+	/*)
+		echo "Do not specify full path, just use device name"
+		exit $FAILURE
+		;;
+	cd[01][c])
+		;;
+	*)
+		echo "Wrong device name, should be like cd0c"
+		exit $FAILURE
+		;;
+	esac
+else
+	DEVICE="cd0c"
+fi
+DEV="/dev/${DEVICE}"
+RDEV="/dev/r${DEVICE}"
+if [ ! -e "${DEV}" ]
+then
+	echo "Cannot find device"
+	exit $FAILURE
+fi
+if [ ! -b "${DEV}" ]
+then
+	echo "Not block device"
+	exit $FAILURE
+fi
+if [ ! -e "${RDEV}" ]
+then
+	echo "Cannot find device"
+	exit $FAILURE
+fi
+if [ ! -c "${RDEV}" ]
+then
+	echo "Not character device"
+	exit $FAILURE
+fi
+
+# Check command.
+CMD="$1"
+ARG=""
+case "${CMD}" in
+"")
+	CMD="/usr/local/bin/vlc"
+	ARG=""
+	;;
+dvd)
+	CMD="/usr/local/bin/vlc"
+	ARG="dvd:////dev/$DEVICE"
+	;;
+cd)
+	CMD="/usr/local/bin/vlc"
+	ARG="cdda:////dev/$DEVICE"
+	;;
+esac
+if [ ! -e "${CMD}" ]
+then
+	echo "Cannot find command"
+	exit $FAILURE
+fi
+if [ ! -x "${CMD}" ]
+then
+	echo "Command not executable"
+	exit $FAILURE
+fi
+case "${CMD}" in
+/usr/local/bin/vlc)
+
+	# OK.
+	;;
+*)
+	echo "Unrecognized command"
+	echo "Use full absolute pathname"
+	exit $FAILURE
+	;;
+esac
+
+# More check.
+if [ "${DOAS_USER}" = "" ]
+then
+	echo "Not running under doas - confused"
+	exit $FAILURE
+fi
+SH="`/usr/bin/grep "${DOAS_USER}" /etc/passwd | /usr/bin/cut -d ':' -f 7`"
+case "${SH}" in
+/bin/ksh|/usr/bin/sh|/usr/bin/ksh|/usr/bin/bash|/usr/local/bin/bash|/usr/local/bin/ksh93)
+
+	# OK.
+	;;
+*)
+	echo "Not prepared for this shell, only ksh types please"
+	exit $FAILURE
+	;;
+esac
+
+# Set up trap.
+trap "/bin/chmod g-w ${DEV}; /usr/sbin/chgrp operator ${DEV}; exit 0" 1 2 3 15
+
+# Change protections. User should be in group cdrom.
+/usr/sbin/chgrp cdrom "${DEV}" "${RDEV}"
+if [ $? -ne 0 ]
+then
+	echo "Error running chgrp"
+	exit $FAILURE
+fi
+/bin/chmod g+w "${DEV}" "${RDEV}"
+if [ $? -ne 0 ]
+then
+	echo "Error running chmod"
+	exit $FAILURE
+fi
+
+# Run command as user.
+if [ "$ARG" = "" ]
+then
+	/usr/bin/su - "${DOAS_USER}" -c "export DISPLAY=':0.0'; ${CMD}"
+	STATUS=$?
+else
+	/usr/bin/su - "${DOAS_USER}" -c "export DISPLAY=':0.0'; ${CMD} ${ARG}"
+	STATUS=$?
+fi
+
+# Restore protections.
+/bin/chmod g-w "${DEV}" "${RDEV}"
+if [ $? -ne 0 ]
+then
+	echo "Error running chmod - cannot restore protections"
+	exit $FAILURE
+fi
+/usr/sbin/chgrp operator "${DEV}" "${RDEV}"
+if [ $? -ne 0 ]
+then
+	echo "Error running chgrp - cannot restore protections"
+	exit $FAILURE
+fi
+
+# Finish.
+exit $STATUS
+

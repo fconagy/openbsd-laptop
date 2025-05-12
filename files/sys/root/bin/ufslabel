@@ -1,0 +1,55 @@
+#!/bin/sh
+
+# Print ufs labels.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script print UFS labels.
+Usage:
+    ufslabel [device...]
+where
+    device      is the device file special
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Disk special device file(s).
+DISKS="$*"
+if [ "$DISKS" = "" ]
+then
+	DISKS="`mount | grep '(ufs,' | awk ' { print $1 } '`"
+fi
+for D in $DISKS
+do
+	if [ ! -c $D ]
+	then
+		echo "$D is not a disk device file"
+		exit $FAILURE
+	fi
+done
+for D in $DISKS
+do
+	case `dumpfs -m $D | egrep -v -e '^#' | awk ' { print $2 } '` in
+	-L)
+
+		# Good, we have a label.
+		L="`dumpfs -m $D | egrep -v -e '^#' | awk ' { print $3 } '`"
+		printf "%s: %s\n" "$D" "$L"
+		;;
+	*)
+		# Bad, probably not UFS.
+		printf "%s: %s\n" "$D" "nolabel"
+		;;
+	esac
+done
+
+# Finish.
+exit $SUCCESS
+

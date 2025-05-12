@@ -1,0 +1,76 @@
+#!/bin/sh
+
+# Find it in source.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script tries to find stuff in the source tree.
+Usage:
+    findsrc [-f][-n name] [pattern...]
+where
+    -l          print only file names.
+    -n name     is a pattern to use to match file names.
+    pattern     is a pattern to search for in the files.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Pager.
+PAGER=${PAGER-more}
+
+# Options.
+GREPOPT="-A 10"
+NAME=""
+DIR=""
+while [ "$1" != "" ]
+do
+	case $1 in
+	-n|--name|-name)
+
+		# File names can be specified repeatedly.
+		shift
+		NAME="$NAME $1"
+		shift
+		;;
+	-d|--dir|-dir)
+		DIR="$1"
+		shift
+		;;
+	-l)
+		shift
+		GREPOPT="$GREPOPT -l"
+		;;
+	-*)
+		echo "Invalid option $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+if [ "$DIR" = "" ]
+then
+	DIR="."
+fi
+if [ "$NAME" != "" ]
+then
+	for N in $NAME
+	do
+		find $DIR -type f -name "$N" -exec grep $GREPOPT "$*" {} \; -print
+	done
+else
+	find $DIR -type f -exec grep $GREPOPT "$*" {} \; -print
+fi
+
+# Finish.
+exit $SUCCESS
+

@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Const.
+SUCCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script switches on the cursor using ANSI
+esacpe sequences.
+Usage:
+    curson
+!EOF
+	;;
+esac
+
+# Clear screen and cursor off.
+#echo -n '[H[J[?25l'
+# Cursor on.
+echo -n '[?25h'
+
+# Finish.
+exit $SUCCESS
+

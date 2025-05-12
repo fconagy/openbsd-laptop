@@ -1,0 +1,60 @@
+#!/bin/sh
+
+# Enable superdrive.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help)
+	/bin/cat <<!EOF
+Enable MAC SuperDrive.
+Usage
+    superdrive [device]
+where
+    device      is the CD/DVD drive like cd0.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Device.
+CD=""
+case "${1}" in
+/*)
+	echo "Specify just device name like cd0"
+	exit $FAILURE
+	;;
+cd0|cd1)
+	CD="${1}"
+	;;
+"")
+	CD="cd0"
+	;;
+*)
+	echo "Invalid device name, use cd0 or cd1"
+	exit $FAILURE
+	;;
+esac
+
+# Got the device.
+DEV="/dev/r${CD}c"
+if [ ! -c "$DEV" ]
+then
+	echo "Cannot find cd drive"
+	exit $FAILURE
+fi
+
+# Issue magic SCSI commands to enable MAC SuperDrive.
+/sbin/scsi -f "${DEV}" -c "EA 00 00 00 00 00 01"
+if [ $? -ne 0 ]
+then
+	echo "Error running SCSI command"
+	exit $FAILURE
+fi
+
+# Success.
+exit $SUCCESS
+

@@ -1,0 +1,63 @@
+#!/bin/sh
+
+# Check if full path command invocations are correct in a script.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script checks if executables called with absolute path
+do exist.
+Usage:
+    check-exec script
+where
+    script      should be a script on path.
+!EOF
+	;;
+esac
+
+# Check.
+if which $1 >/dev/nul 2>&1
+then
+	SCRIPT="`which $1`"
+else
+	echo "Cannot find $1 on path"
+	exit $FAILURE
+fi
+
+# Get absolute path invocations.
+cat $SCRIPT | egrep -e '	/| /' | \
+	sed 's/^.*	\//\//; s/^.* \//\//' | awk ' { print $1 } ' | \
+while read F
+do
+	if [ ! -e $F ]
+	then
+
+		# File not there.
+		if which `basename $F` >/dev/null 2>&1
+		then
+			NAME="`basename $F`"
+			FP="`which $NAME`"
+			echo "$F not found should be $FP"
+		else
+			echo "$F not found"
+		fi
+	else
+		if [ ! -x $F ]
+		then
+
+			# File is not executable.
+			echo "$F not executable"
+		else
+			echo "$F OK"
+		fi
+	fi
+done
+
+# Finish.
+exit $SUCCESS
+

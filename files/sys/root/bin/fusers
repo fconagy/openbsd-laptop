@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# List processes holding open files.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script prints the processes holding open files
+on a disk.
+Usage:
+    fusers [disk]
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Device.
+DEV=${1-/dev/sd0a}
+if [ ! -b $DEV ]
+then
+	echo "Cannot find block device $DEV"
+	exit $FAILURE
+fi
+
+# PID list.
+PIDS="`fuser $DEV 2>&1 | sed 's/^.*://; s/[crt]//g'`"
+
+# Print processes.
+for P in $PIDS
+do
+	ps $P | grep -v '  PID '
+done | sort -n
+
+# Finish.
+exit $SUCCESS
+

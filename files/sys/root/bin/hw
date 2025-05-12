@@ -1,0 +1,296 @@
+#!/bin/sh
+
+# Hardware settings.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help|help|"")
+	/bin/cat <<!EOF
+This script changes hardware properties.
+Usage:
+    hw prop value
+where
+    prop    is the hardware property
+            cpu for CPU speed
+                slow or fast or percentage
+            display for the LCD screen of the laptop
+                percentage or off
+            backlight for the laptop keyboard backlight
+                percentage or off
+            encoding to change the keyboard map.
+                Argument can be us, uk etc.
+            repeat to change the keyboard repeat rate.
+                Argument is a number, the delay between
+                repeats. E.g. 20 is real fast.
+            ledstate to change the state of keyboard LEDs.
+                number, 0-7.
+            mouse
+                on or off.
+            video
+                Recording on or off.
+            audio
+                Recording on or off.
+            sound
+                Use sound card n, starts with 0.
+    value   is the value or keyword to use
+Note:
+  Display is the LCD display of the laptop.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+WHAT="${1}"
+case "${WHAT}" in
+cpu)
+	shift
+	case "${1}" in
+	slow)
+		/sbin/sysctl hw.perfpolicy=manual >/dev/null
+		/sbin/sysctl hw.setperf=0 >/dev/null
+		;;
+	fast)
+		/sbin/sysctl hw.perfpolicy=manual >/dev/null
+		/sbin/sysctl hw.setperf=100 >/dev/null
+		;;
+	[0-9]|[0-9][0-9]|100)
+		/sbin/sysctl hw.perfpolicy=manual >/dev/null
+		/sbin/sysctl hw.setperf=${1} >/dev/null
+		;;
+	*)
+		echo "Wrong value"
+		exit $FAILURE
+		;;
+	esac
+	/sbin/sysctl hw.cpuspeed
+	;;
+display)
+	shift
+	case "${1}" in
+	off)
+		/sbin/wsconsctl display.brightness=0 >/dev/null
+		;;
+	[0-9]|[0-9][0-9]|100)
+		/sbin/wsconsctl display.brightness=${1} >/dev/null
+		;;
+	*)
+		echo "Wrong value"
+		exit $FAILURE
+		;;
+	esac
+	;;
+backlight)
+	shift
+	PERC="${1}"
+	case "${PERC}" in
+	off)
+		/sbin/wsconsctl keyboard.backlight=0 >/dev/null
+		;;
+	[0-9]|[0-9][0-9]|100)
+		/sbin/wsconsctl keyboard.backlight=${PERC} >/dev/null
+		;;
+	*)
+		echo "Wrong value"
+		exit $FAILURE
+		;;
+	esac
+	;;
+encoding)
+	shift
+	ENCODING="${1}"
+	case "${ENCODING}" in
+	uk|us)
+		/sbin/wsconsctl -a 2>/dev/null | grep '\.encoding=' | sed 's/=.*$//' | \
+		while read ITEM REST
+		do
+			/sbin/wsconsctl ${ITEM}=${ENCODING} >/dev/null
+		done
+		;;
+	*)
+		echo "Wrong encoding"
+		exit $FAILURE
+		;;
+	esac
+	;;
+repeat)
+	shift
+	REPEAT="${1}"
+	case "${REPEAT}" in
+	[0-9][0-9])
+		/sbin/wsconsctl -a 2>/dev/null | grep '\.deln=' | sed 's/=.*$//' | \
+		while read ITEM REST
+		do
+			/sbin/wsconsctl ${ITEM}=${REPEAT}
+		done
+		;;
+	*)
+		echo "Wrong repeat"
+		exit $FAILURE
+		;;
+	esac
+	;;
+ledstate)
+	shift
+	LEDSTATE="${1}"
+	case "${LEDSTATE}" in
+	[0-9][0-9]|[0-9])
+		/sbin/wsconsctl -a 2>/dev/null | grep '\.ledstate=' | sed 's/=.*$//' | \
+		while read ITEM REST
+		do
+			/sbin/wsconsctl ${ITEM}=${LEDSTATE} >/dev/null 2>&1
+		done
+		;;
+	*)
+		echo "Wrong ledstate"
+		exit $FAILURE
+		;;
+	esac
+	;;
+mouse)
+	shift
+	case "${1}" in
+	off)
+
+		# Kill the mouse daemon.
+		PID="`ps -axu | grep wsmoused | grep -v grep | awk ' { print $2 } '`"
+		if [ "$PID" != "" ]
+		then
+			kill $PID
+		fi
+
+		# Try to restore original values.
+		/sbin/wsconsctl mouse.param=0:0,1:0 >/dev/null
+		/sbin/wsconsctl mouse1.param=0:0,1:0 >/dev/null
+		if /sbin/wsconsctl mouse2 >/dev/null 2>&1
+		then
+			/sbin/wsconsctl mouse2.param=0:0,1:0 >/dev/null
+		fi
+		;;
+	on)
+
+		# Start the mouse daemon, right button pastes.
+		nohup /usr/sbin/wsmoused -M 2=3 -M 3=2 >/var/log/wsmoused.log 2>&1 &
+
+		# Make mouse slower.
+		# Mouse1 is the trackpad.
+		/sbin/wsconsctl mouse.param=0:770,1:600 >/dev/null
+		/sbin/wsconsctl mouse1.param=0:401,1:401 >/dev/null
+		if /sbin/wsconsctl mouse2 >/dev/null 2>&1
+		then
+			/sbin/wsconsctl mouse2.param=0:401,1:401 >/dev/null
+		fi
+		;;
+	*)
+		echo "Wrong value"
+		exit $FAILURE
+		;;
+	esac
+	;;
+video)
+	shift
+	VIDEODEV=/dev/video0
+	if [ ! -c $VIDEODEV ]
+	then
+		echo "Video device not found"
+		exit $FAILURE
+	fi
+	if [ "${DOAS_USER}" = "" ]
+	then
+		UID="`/usr/bin/id -u`"
+		if [ "${UID}" != "0" ]
+		then
+			echo "Not running under doas - confused"
+			exit $FAILURE
+		fi
+	fi
+	case "${1}" in
+	on)
+		/sbin/sysctl kern.video.record=1
+		if [ "${DOAS_USER}" != "" ]
+		then
+			/sbin/chown ${DOAS_USER} $VIDEODEV
+		fi
+		;;
+	off)
+		/sbin/sysctl kern.video.record=0
+		/sbin/chown root $VIDEODEV
+		;;
+	*)
+		echo "Wrong argument"
+		exit $FAILURE
+		;;
+	esac
+	;;
+audio)
+	shift
+	case "${1}" in
+	on)
+		/sbin/sysctl kern.audio.record=1
+		;;
+	off)
+		/sbin/sysctl kern.audio.record=0
+		;;
+	*)
+		echo "Wrong argument"
+		exit $FAILURE
+		;;
+	esac
+	;;
+sound)
+	shift
+	case "${1}" in
+	[0-9])
+		echo "Switching soundcard to device ${1}"
+		/usr/bin/sndioctl server.device=$1
+		if [ $? -ne 0 ]
+		then
+			echo "There was an error running sndioctl"
+			exit $FAILURE
+		fi
+		;;
+	"")
+		/usr/bin/sndioctl server.device
+		;;
+	info)
+		for D in /dev/audioctl*
+		do
+			if /usr/bin/audioctl -f "${D}" >/dev/null 2>&1
+			then
+				echo "==== audioctl ${D}"
+				/usr/bin/audioctl -f "${D}"
+			fi
+		done
+		echo "==== sndioctl"
+		/usr/bin/sndioctl
+		echo "==== mixerctl"
+		/usr/bin/mixerctl
+		echo "==== devices"
+		/sbin/dmesg | /usr/bin/grep -i audio
+		;;
+	unmute)
+		/usr/bin/mixerctl | /usr/bin/grep 'mute=' | /usr/bin/sed 's/=on/=off/; s/^/\/usr\/bin\/mixerctl /' | /bin/sh
+		/usr/bin/sndioctl | /usr/bin/grep 'mute=' | /usr/bin/sed 's/=1/=0/; s/^/\/usr\/bin\/sndioctl /' | /bin/sh
+		;;
+	mute)
+		/usr/bin/mixerctl | /usr/bin/grep 'mute=' | /usr/bin/sed 's/=off/=on/; s/^/\/usr\/bin\/mixerctl /' | /bin/sh
+		/usr/bin/sndioctl | /usr/bin/grep 'mute=' | /usr/bin/sed 's/=0/=1/; s/^/\/usr\/bin\/sndioctl /' | /bin/sh
+		;;
+	*)
+		echo "Wrong argument to sound"
+		exit $FAILURE
+		;;
+	esac
+	;;
+*)
+	echo "Unknown property"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

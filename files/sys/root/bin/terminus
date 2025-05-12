@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# Set terminus console font.
+# See /usr/local/share/doc/pkg-readmes/terminus-font .
+# Needs package terminus-font to be installed.
+
+# Quit on error.
+set -e
+
+# Print help.
+case "${1}" in
+-h|--help|-help)
+	cat <<!EOF
+This script switches font to terminus and back.
+Usage:
+    terminus on|off
+!EOF
+	exit 1
+	;;
+esac
+
+case "${1}" in
+on)
+	if wsfontload -l | grep ter-132n >/dev/null
+	then
+		:
+	else
+		wsfontload -N ter-132n -w 16 -h 32 /usr/local/share/misc/pcvtfonts/ter-132n
+	fi
+	wsconsctl display.font=ter-132n
+	;;
+off)
+	wsconsctl display.font="Spleen 16x32"
+	;;
+*)
+	echo "Wrong option"
+	exit 1
+	;;
+esac
+

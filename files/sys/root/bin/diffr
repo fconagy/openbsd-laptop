@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# Compare directories.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+Compare directories. Use diff recursive.
+Usage:
+	diffr s d
+where
+    s       source directory
+    d       destination directory
+!EOF
+	;;
+esac
+
+# Check.
+if [ "$2" = "" ]
+then
+	echo "Specify source and destination directories"
+	exit $FAILURE
+fi
+SDIR="$1"
+DDIR="$2"
+if [ ! -d $SDIR ]
+then
+	echo "$SDIR is not a directory"
+	exit $FAILURE
+fi
+if [ ! -d $DDIR ]
+then
+	echo "$DDIR is not a directory"
+	exit $FAILURE
+fi
+
+# Compare.
+diff -q -r $SDIR $DDIR | egrep -e '^Only in |^Binary files |Files '
+
+# Finish.
+exit $SUCCESS
+

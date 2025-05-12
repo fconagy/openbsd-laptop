@@ -1,0 +1,253 @@
+#!/bin/sh
+
+# Deal with setuid and setgid programs.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script is dealing with setuid and setgid programs.
+Usage:
+    setuids [disable|enable|list]
+where
+    disable         remove setuid and setgid privileges as specified
+                    in the config file.
+    enable          restore setuid and setgid file protections to the
+                    original state as specified in the config file.
+    list            list setuid and setgid programs on the machine.
+                    You can use this list as an initial setuid.conf file.
+    compare f1 f2   takes two files as arguments.
+                    Goes thru the file list in the second file and
+                    looks up every file if it has an entry in the first
+                    file. If it has not then it is reported as a new entry.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Directories to check.
+DIR="/ /usr /usr/local /usr/ports /usr/ports/distfiles \
+/usr/ports/packages /usr/src /var /var/crash /var/db \
+/var/db/pkg /var/empty /var/log /var/mail /var/run \
+/var/tmp /tmp /home"
+
+# Configuration file. Directory etc one level up.
+CONF=`dirname $0`/../etc/setuids.conf
+if [ ! -r $CONF ]
+then
+	case $1 in
+	-l|--list|-list|list)
+
+		# Don't bother when list.
+		;;
+	*)
+		echo "Cannot find $CONF"
+		exit $FAILURE
+		;;
+	esac
+fi
+
+# Get command.
+CMD="$1"
+case $CMD in
+-l|--list|-list|list)
+
+	# List setuid and setgid programs.
+	for D in $DIR
+	do
+		if [ -d $D ]
+		then
+			if [ "`df $D | grep -v '^Filesystem' | awk ' { print $6 } '`" = "$D" ]
+			then
+
+				# If the directory is also a mount point.
+				find $D -xdev -type f -perm -04000 -ls | \
+					awk ' { printf "%-42s %s %-12s %-12s %s\n", $11, "uid", $5, $6, $3 } '
+				find $D -xdev -type f -perm -02000 -ls | \
+					awk ' { printf "%-42s %s %-12s %-12s %s\n", $11, "gid", $5, $6, $3 } '
+			fi
+		fi
+	done | sort
+	;;
+-d|--disable|-disable|disable)
+
+	cat $CONF | sed '/^ *#/d; /^#/d; s/#.*$//; /^$/d;' | \
+	while read FILE TYPE REST
+	do
+
+		# Deal with file flags under FreeBSD.
+		case `uname -s` in
+		FreeBSD)
+
+			# Needs extra magic.
+			FLAGS="`ls -lo $FILE | awk ' { print $5 } '`"
+			case $FLAGS in
+			-)
+				;;
+			*schg*)
+				chflags noschg $FILE
+				if [ $? -ne 0 ]
+				then
+					echo "Error running chflags for $FILE"
+				fi
+				;;
+			esac
+			# Remove acls, they would interfere.
+			# Actually this is not necessary.
+			#setfacl -k $FILE
+			;;
+		esac
+
+		# Take off suid/gid bit.
+		case $TYPE in
+		uid)
+			chmod u-s $FILE
+			if [ $? -ne 0 ]
+			then
+				echo "Error running chmod"
+				exit $FAILURE
+			fi
+			;;
+		gid)
+			chmod g-s $FILE
+			if [ $? -ne 0 ]
+			then
+				echo "Error running chmod"
+				exit $FAILURE
+			fi
+			;;
+		esac
+	done
+	exit $SUCCESS
+	;;
+-e|--enable|-enable|enable)
+
+	cat $CONF | sed '/^ *#/d; /^#/d; s/#.*$//; /^$/d;' | \
+	while read FILE TYPE REST
+	do
+		case $TYPE in
+		uid)
+			chmod u+s $FILE
+			if [ $? -ne 0 ]
+			then
+				echo "Error running chmod"
+				exit $FAILURE
+			fi
+			;;
+		gid)
+			chmod g+s $FILE
+			if [ $? -ne 0 ]
+			then
+				echo "Error running chmod"
+				exit $FAILURE
+			fi
+			;;
+		*)
+
+			echo "Unknown type $TYPE for $FILE in $CONF"
+			exit $FAILURE
+			;;
+		esac
+	done
+	exit $SUCCESS
+	;;
+-c|--compare|-compare|compare)
+
+	# Compare a config file with a list.
+	# First should be a config file.
+	# Second is a list, every file on the list is looked up in
+	# the config file.
+	shift
+	FIRST="$1"
+	shift
+	SECOND="$1"
+	shift
+	if [ "$SECOND" = "" ]
+	then
+		echo "Specify first and second file"
+		exit $FAILURE
+	fi
+	if [ ! -r $FIRST ]
+	then
+		echo "Cannot find $FIRST"
+		exit $FAILURE
+	fi
+	if [ ! -r $SECOND ]
+	then
+		echo "Cannot find $SECOND"
+		exit $FAILURE
+	fi
+	cat $SECOND | while read F REST
+	do
+		if egrep -e "^[	 ]*$F |^[	 ]*\#$F " $FIRST >/dev/null 2>&1
+		then
+			LINE="`egrep -e "^[	 ]*$F |^[	 ]*\#$F " $FIRST`"
+			if echo "${LINE}" | egrep -e '^[	 ]*\#' >/dev/null 2>&1
+			then
+
+				# It is in comment so it is enabled.
+				echo "$F enabled"
+			else
+
+				# Disabled like the most.
+				echo "$F disabled"
+			fi
+		else
+
+			# Only in the second.
+			echo "$F new"
+		fi
+	done
+	exit $SUCCESS
+	;;
+-C|--check|-check|check)
+
+	# Check if current file has setuid/setgid.
+	shift
+
+	PROBLEM=problem.tmp
+	rm -f $PROBLEM
+	cat $CONF | sed '/^ *#/d; /^#/d; s/#.*$//; /^$/d;' | \
+		while read FILE TYPE UID GID PROT REST
+	do
+		if [ ! -e $FILE ]
+		then
+			echo "$FILE does not exist"
+		fi
+		CURPROT="`ls -l $FILE | awk ' { print $1 } '`"
+		if [ "$1" = "list" ]
+		then
+			printf "%60s %s %8s %8s %s %s\n" "$FILE" "$TYPE" "$UID" "$GID" "$PROT" "$CURPROT"
+		fi
+		if echo "$CURPROT" | grep 's' >/dev/null
+		then
+
+			# On the list but has setuid/setgid still.
+			echo "$CURPROT $FILE"
+			touch $PROBLEM
+		fi
+	done
+	if [ -r $PROBLEM ]
+	then
+		rm -f $PROBLEM
+		exit $FAILURE
+	fi
+	exit $SUCCESS
+	;;
+"")
+	echo "Specify command"
+	exit $FAILURE
+	;;
+*)
+	echo "Unknown command $CMD"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

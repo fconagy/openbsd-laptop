@@ -1,0 +1,485 @@
+#!/bin/sh
+
+# Show the differences within a mod checkpoint or patch.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script shows the new file or the patch, respective
+to the 'mod checkpoint' file.
+Usage:
+    mod-patch [-f] [[orig] show view][help|ls|dir|patch|new|diff|
+        check|checkall] pattern
+where
+    -f          force, apply patch anyway.
+    orig        show/view the original file in the system.
+    help        prints this help.
+    ls          lists matching files.
+    dir         lists matching files.
+    patch       applies the patch to make the original checkpointed
+                file under the OS to look like the 'mod checkpoint' file.
+                Runs 'mod filename' before patching.
+    new         show how the new file would look
+    diff        show the patch which would be applied to the file in the system.
+    show        show the checkpointed file or the original file in the system.
+    view        show the checkpointed file or the original file with an editor.
+    check       check if the checkpointed file is the same as the system file.
+    checkall    check if all mod-ded files are the same in the system as the
+                checkpointed file.
+    pattern     used to grep the directory listing to select a file
+Note:
+    You should be in the 'mod checkpoint' saved directory to be able to use
+    the script.
+    Creates file mod-patch.diff and mod-patch.new in the current directory.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+PWD="`pwd`"
+case $PWD in
+*.chkpt)
+	;;
+*)
+	echo "Does not look like a checkpoint directory"
+	exit $FAILURE
+	;;
+esac
+
+# Force patch flag.
+FORCE=no
+
+# Original to show/view.
+ORIGINAL=no
+
+# Flags.
+case $1 in
+-f|--force|-force)
+	shift
+	FORCE=yes
+	;;
+orig)
+	shift
+	ORIGINAL=yes
+	;;
+esac
+
+# Command to do.
+OPTION="$1"
+case $OPTION in
+"")
+	echo "Specify command"
+	exit $FAILURE
+	;;
+-p|--patch|-patch|patch)
+	CMD=patch
+	;;
+-n|--new|-new|new)
+	CMD=new
+	;;
+-d|--diff|-diff|diff)
+	CMD=diff
+	;;
+-l|--ls|-ls|ls|--dir|-dir|dir)
+	if [ "$2" = "" ]
+	then
+
+		# Just list everything.
+		ls | sed 's/^.*=//; s/--/\//g'
+	else
+		ls | sed 's/^.*=//; s/--/\//g' | grep "$2"
+	fi
+	exit $SUCCESS
+	CMD=ls
+	;;
+-s|--show|-show|show)
+	CMD=show
+	;;
+-v|--view|-view|view)
+	CMD=view
+	;;
+-c|--check|-check|check)
+	CMD=check
+	;;
+-C|--checkall|-checkall|checkall)
+	ls | sed 's/^.*=//; s/--/\//g' | sort -u | while read F REST
+	do
+		if [ -r $F ]
+		then
+			if ls | sed 's/^.*=//; s/--/\//g' | grep "${F}$" >/dev/null 2>&1
+			then
+				mod-patch check "${F}$"
+			else
+				echo "$F notcheckpointed"
+			fi
+		else
+			echo "$F notfound"
+		fi
+	done
+	exit $SUCCESS
+	;;
+*)
+	echo "Wrong command $OPTION"
+	exit $FAILURE
+	;;
+esac
+shift
+
+# File name pattern to match. We should have only one file.
+# Note that the listing is run through sort -u so for one file
+# only one modification should be present.
+NAME="$1"
+case $NAME in
+"")
+	echo "Specify name"
+	exit $FAILURE
+	;;
+esac
+COUNT=`ls | sed 's/^.*=//; s/--/\//g' | sort -u | grep "$NAME" | wc -l`
+if [ $COUNT -eq 0 ]
+then
+	echo "File $NAME does not seem to be checkpointed"
+	exit $FAILURE
+elif [ $COUNT -eq 1 ]
+then
+	:
+else
+	echo "More than one files found for $NAME as listed below"
+	ls | sed 's/^.*=//; s/--/\//g' | sort -u | grep "$NAME"
+	echo "Try to use a pattern wich is like \"/path\$\""
+	exit $FAILURE
+fi
+
+# Proper name found.
+NAME=`ls | sed 's/^.*=//; s/--/\//g' | sort -u | grep "$NAME"`
+shift
+
+# Diff output.
+DIFF=mod-patch.diff
+
+# New file.
+NEW=mod-patch.new
+
+# Mod file name.
+MODNAME="`echo $NAME | sed 's/\//--/g'`"
+MODFILENAME="`ls | grep \"=${MODNAME}\"`"
+if [ "$MODFILENAME" = "" ]
+then
+	echo "Wrong name $NAME"
+	exit $FAILURE
+fi
+
+# The original file.
+ORIG="`echo $MODFILENAME | sed 's/^.*=//; s/--/\//g'`"
+if [ "$ORIG" = "" ]
+then
+	echo "Wrong filename $NAME"
+	exit $FAILURE
+fi
+
+# Create diff to bring the config file to the checkpointed one.
+# Only when command is not show.
+case $CMD in
+ls|show|view|check)
+
+	# Don't bother.
+	;;
+*)
+
+	if [ -r $ORIG ]
+	then
+		if [ ! -w $ORIG ]
+		then
+			echo "Original $ORIG not writable"
+			exit $FAILURE
+		fi
+		diff $ORIG $MODFILENAME >$DIFF
+		STATUS=$?
+		if [ $STATUS -eq 0 ]
+		then
+			echo "$ORIG is the same as the checkpointed file"
+			exit $SUCCESS
+		elif [ $STATUS -eq 1 ]
+		then
+
+			# We are fine.
+			:
+		else
+			echo "Error $STATUS running diff"
+			exit $FAILURE
+		fi
+	else
+
+		# No diff as no original file.
+		:
+	fi
+	;;
+esac
+
+# Do.
+case $CMD in
+ls)
+
+	# Show which file.
+	if [ ! -r $ORIG ]
+	then
+		echo "$ORIG not present"
+	else
+		echo "$ORIG present"
+	fi
+	;;
+patch)
+
+	# If the file in the system is newer, we don't patch.
+	if [ $ORIG -nt $MODFILENAME ]
+	then
+		if [ $FORCE = yes ]
+		then
+			echo "$ORIG newer but patch forced anyway"
+		else
+			echo "$ORIG newer - patch not applied"
+			exit $FAILURE
+		fi
+	fi
+
+	# Execute the patch.
+	if [ ! -e $ORIG ]
+	then
+
+		# No original, just copy in from checkpoint.
+		echo "No file $ORIG installing as new"
+		DIR="`dirname $ORIG`"
+		if [ ! -d $DIR ]
+		then
+			echo "Creating $DIR"
+			mkdir -p $DIR
+			if [ $? -ne 0 ]
+			then
+				echo "Error creating $DIR"
+				exit $FAILURE
+			fi
+		fi
+		cp -p $MODFILENAME $ORIG
+		if [ $? -ne 0 ]
+		then
+			echo "Error running cp"
+			exit $FAILURE
+		fi
+
+		# New file, mod it so we will remember.
+		mod $ORIG
+		if [ $? -ne 0 ]
+		then
+			echo "Error mod-ding $ORIG"
+			exit $FAILURE
+		fi
+	else
+		if [ ! -w $ORIG ]
+		then
+			echo "$ORIG not writable"
+			exit $FAILURE
+		fi
+
+		# Run mod before patching.
+		mod $ORIG
+		if [ $? -ne 0 ]
+		then
+			echo "Error mod-ding $ORIG"
+			exit $FAILURE
+		fi
+
+		# Save the original. Looks like patch
+		# cannot do it like -b because of a bug.
+		SAVE=${ORIG}.orig
+		if [ ! -r $SAVE ]
+		then
+			cp -p $ORIG $SAVE
+			if [ $? -ne 0 ]
+			then
+				echo "Error saving $ORIG"
+				exit $FAILURE
+			fi
+		fi
+
+		# Patch. Specify --posix so no -b which fails.
+		patch --posix $ORIG $DIFF
+		if [ $? -ne 0 ]
+		then
+			echo "Error running patch"
+			exit $FAILURE
+		fi
+		if [ ! -e ${ORIG}.orig ]
+		then
+
+			# Paranoid check.
+			echo "Cannot find patch backup file for $ORIG"
+			exit $FAILURE
+		fi
+	fi
+
+	# Check.
+	diff $ORIG $MODFILENAME
+	if [ $? -ne 0 ]
+	then
+
+		# Paranoid check triggered.
+		echo "There is a difference for $ORIG - confused"
+		exit $FAILURE
+	fi
+	;;
+new)
+	if [ $ORIG -nt $MODFILENAME ]
+	then
+		echo ""
+		echo "==== $ORIG newer - note that the patch would not be applied"
+		echo ""
+	fi
+
+	# Show how the patched file would look.
+	if [ ! -r $ORIG ]
+	then
+
+		# No original.
+		echo "==== Copy $ORIG"
+		cat $MODFILENAME
+		echo "==== Done $ORIG"
+	else
+		echo "==== Patching $ORIG"
+		patch --posix -o $NEW $ORIG $DIFF
+		STATUS=$?
+		if [ $STATUS -ne 0 ]
+		then
+			echo "Error $STATUS running patch"
+			exit $FAILURE
+		fi
+		echo "==== Done $ORIG"
+		diff $NEW $MODFILENAME
+		if [ $? -ne 0 ]
+		then
+
+			# Paranoid check triggered.
+			echo "There is a difference - confused"
+			exit $FAILURE
+		fi
+		cat $NEW
+	fi
+	;;
+diff)
+
+	# Show the diff.
+	if [ ! -r $ORIG ]
+	then
+		echo "No $ORIG no diff"
+	else
+		if [ $ORIG -nt $MODFILENAME ]
+		then
+			echo ""
+			echo "==== $ORIG newer - note that the patch shown would not be applied"
+			echo ""
+		fi
+		cat $DIFF
+	fi
+	;;
+show)
+
+	# Show the checkpointed file or the original.
+	if [ $ORIGINAL = yes ]
+	then
+		if [ ! -r $ORIG ]
+		then
+			echo "Cannot find file $ORIG"
+			exit $FAILURE
+		fi
+		cat $ORIG
+	else
+		if [ ! -r $MODFILENAME ]
+		then
+			echo "No checkpointed file for $ORIG"
+			exit $FAILURE
+		fi
+		cat $MODFILENAME
+	fi
+	;;
+view)
+
+	# Edit the checkpointed file.
+	if [ $ORIGINAL = yes ]
+	then
+		if [ ! -r $ORIG ]
+		then
+			echo "Cannot find file $ORIG"
+			exit $FAILURE
+		fi
+		if [ "$EDITOR" = "" ]
+		then
+			view $ORIG
+		else
+			$EDITOR $ORIG
+		fi
+	else
+		if [ ! -r $MODFILENAME ]
+		then
+			echo "No checkpointed file for $ORIG"
+			exit $FAILURE
+		fi
+		if [ "$EDITOR" = "" ]
+		then
+			view $MODFILENAME
+		else
+			$EDITOR $MODFILENAME
+		fi
+	fi
+	;;
+check)
+	if [ "$ORIG" = "" ]
+	then
+		echo "Specify pattern"
+		exit $FAILURE
+	fi
+	if [ ! -r $ORIG ]
+	then
+		echo "$ORIG nonexistent"
+		exit $FAILURE
+	else
+		if [ $ORIG -nt $MODFILENAME ]
+		then
+			diff $ORIG $MODFILENAME >/dev/null 2>&1
+			if [ $? -eq 0 ]
+			then
+				echo "$ORIG newer same"
+				exit $SUCCESS
+			else
+				echo "$ORIG newer different"
+				exit $FAILURE
+			fi
+		else
+			diff $ORIG $MODFILENAME >/dev/null 2>&1
+			if [ $? -ne 0 ]
+			then
+				echo "$ORIG different"
+				exit $FAILURE
+			else
+				echo "$ORIG ok"
+				exit $SUCCESS
+			fi
+		fi
+	fi
+	;;
+*)
+
+	# Bail out.
+	echo "Wrong $CMD - confused"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+rm -f $DIFF $NEW
+exit $SUCCESS
+

@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# Shut down, OpenBSD on miletus.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Do not print help.
+
+# Check.
+if [ `id -u` != 0 ]
+then
+	echo "You have to run this script as root"
+	exit $FAILURE
+fi
+
+# Clear console screen and switch off cursor.
+# ANSI escape sequences.
+if [ -x /root/bin/wsswitch ]
+then
+	/root/bin/wsswitch 1
+fi
+echo -n '[H[J[?25l' >/dev/console
+
+# Run shutdown with power off.
+cd /
+/usr/bin/nohup /sbin/shutdown -p now >/dev/null 2>&1 &
+
+# Finish.
+exit $SUCCESS
+

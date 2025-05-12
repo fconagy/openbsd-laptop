@@ -1,0 +1,52 @@
+.\" $Id: enroll_fingerprint.1,v 1.2 2009/03/26 20:51:59 robert Exp $
+.\"
+.\" Copyright (c) 2009 Robert Nagy <robert@openbsd.org>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate: March 26 2009 $
+.Dt ENROLL_FINGERPRINT 8
+.Os
+.Sh NAME
+.Nm enroll_fingerprint
+.Nd enroll_fingerprint fingerprints
+.Sh SYNOPSIS
+.Nm enroll_fingerprint
+.Op Fl f Ar fnum
+.Sh DESCRIPTION
+The
+.Nm
+utility can be used to enroll fingerprint datafiles that can be
+used for authenticating with fingerprints or by any other application
+that uses libfprint.
+.Pp
+The options are as follows:
+.Bl -tag -width "-f fileXXX"
+.It Fl f Ar fnum 
+Use the fingerprint on the specified finger for authorization.
+Each finger is associated with a number between 1 and 10:
+.Bl -tag -width x-fingerprint
+.It Er 1 Em "Left thumb" .
+.It Er 2 Em "Left index" .
+.It Er 3 Em "Left middle" .
+.It Er 4 Em "Left ring" .
+.It Er 5 Em "Left small" .
+.It Er 6 Em "Right thumb" .
+.It Er 7 Em "Right index" .
+.It Er 8 Em "Right middle" .
+.It Er 9 Em "Right ring" .
+.It Er 10 Em "Right small" .
+.Pp
+.Sh SEE ALSO
+.Xr login_fingerprint 8 ,
+.Xr ugen 4

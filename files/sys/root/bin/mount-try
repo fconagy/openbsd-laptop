@@ -1,0 +1,208 @@
+#!/bin/sh
+
+# Try to mount. Will work only with MBR partition table.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script tries to mount an alien device.
+Usage:
+    mount-try disk driveletter mountpoint
+where
+    disk        is the name of the disk file (not the full path),
+                something like sd5.
+    driveletter is the one letter id of the disk drive in the
+                partition table / disk label. This would be typically
+                i for an MS-DOS disk. Do not use b or c.
+    mountpoint  usually /mnt.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Disk.
+DISK="$1"
+case $DISK in
+"")
+	echo "Specify disk device name"
+	exit $FAILURE
+	;;
+/*)
+	echo "Specify disk device file name only, not with absolute path"
+	exit $FAILURE
+	;;
+esac
+if [ ! -c /dev/r${DISK}c ]
+then
+	echo "$DISK not a character device"
+	exit $FAILURE
+fi
+shift
+
+# Drive letter.
+DLT="$1"
+case $DLT in
+"")
+	echo "Specify disk drive letter like j"
+	exit $FAILURE
+	;;
+[ad-z])
+
+	# OK.
+	;;
+*)
+	echo "Illegal drive letter"
+	exit $FAILURE
+	;;
+esac
+shift
+
+# Mount point.
+MNT="$1"
+if [ "$MNT" = "" ]
+then
+	echo "Specify mount point"
+	exit $FAILURE
+fi
+if [ ! -d $MNT ]
+then
+	echo "Cannot find mount point"
+	exit $FAILURE
+fi
+if mount | grep ' on ' | awk ' { print $3 } ' | grep "^${MNT}\$" >/dev/null
+then
+	echo "$MNT already mounted"
+	exit $FAILURE
+fi
+shift
+
+# Mount option.
+MOUNTOPT="ro"
+case "$1" in
+"")
+	MOUNTOPT="ro"
+	;;
+rw)
+	MOUNTOPT="rw"
+	;;
+ro|rdonly)
+	MOUNTOPT="ro"
+	;;
+*)
+	echo "Wrong mount option"
+	exit $FAILURE
+	;;
+esac
+
+# Device file.
+DEV=/dev/${DISK}${DLT}
+if [ ! -b /dev/${DISK}${DLT} ]
+then
+	echo "$DEV not a block device file"
+	exit $FAILURE
+fi
+
+# Flag file.
+DLTFOUND=mount-try.tmp
+rm -f $DLTFOUND
+
+# Log file.
+LOG=mount-try.log
+rm -f $LOG
+
+# Check.
+disklabel $DISK
+echo -n "Will try to mount $DLT on $MNT $MOUNTOPT, OK to continue? [n]: "
+read ANSWER
+case $ANSWER in
+[yY]|[yY][eE][sS])
+	;;
+*)
+	echo "Execution canceled"
+	exit $FAILURE
+	;;
+esac
+
+# Get disk label info.
+disklabel $DISK | grep '^  [ad-z]' | \
+	while read PARTITION SIZE OFFSET FSTYPE REST
+do
+	LETTER="`echo $PARTITION | sed 's/://'`"
+	if [ "$LETTER" = "$DLT" ]
+	then
+
+		# Our selected drive letter.
+		touch $DLTFOUND
+		#printf "%s %s\n" "$LETTER" "$FSTYPE"
+
+		# Give it a try.
+		case $FSTYPE in
+		NTFS)
+
+			# NTFS or EXFAT.
+			# Try NTFS.
+			mount -t ntfs -o $MOUNTOPT $DEV $MNT >$LOG 2>&1
+			if [ $? -eq 0 ]
+			then
+				echo "Mounted $MNT NTFS $MOUNTOPT"
+			else
+
+				# Try EXFAT.
+				mount.exfat -o $MOUNTOPT $DEV $MNT >$LOG 2>&1
+				if [ $? -eq 0 ]
+				then
+					echo "Mounted $MNT EXFAT $MOUNTOPT"
+				else
+					echo "Not NTFS and not EXFAT - confused"
+				cat $LOG
+					exit $FAILURE
+				fi
+			fi
+			;;
+		MSDOS)
+
+			# Messdos.
+			mount -t msdos -o $MOUNTOPT $DEV $MNT >$LOG 2>&1
+			if [ $? -eq 0 ]
+			then
+				echo "Mounted $MNT MSDOS $MOUNTOPT"
+			else
+				echo "Marked as MSDOS but failed to mount"
+				cat $LOG
+				exit $FAILURE
+			fi
+			;;
+		4.2BSD)
+			mount -t msdos -o $MOUNTOPT $DEV $MNT >$LOG 2>&1
+			if [ $? -eq 0 ]
+			then
+				echo "Mounted $MNT Berkeley FFS $MOUNTOPT"
+			else
+				echo "Marked as 4.2BSD but mount failed"
+				cat $LOG
+				exit $FAILURE
+			fi
+			;;
+		*)
+			echo "Unknown file system type $FSTYPE"
+			exit $FAILURE
+			;;
+		esac
+	fi
+done
+if [ ! -r $DLTFOUND ]
+then
+	echo "Partition $DLT not found in disk label"
+	exit $FAILURE
+fi
+
+# Finish.
+rm -f $DLTFOUND
+rm -f $LOG
+exit $SUCCESS
+

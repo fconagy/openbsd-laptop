@@ -1,0 +1,147 @@
+#!/bin/sh
+
+# Show system processes.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script shows processes.
+    sys [-c] [pattern]
+where
+    -c          for contiguous display.
+    -k          kill selected processes.
+    -u user     show processes only for the give user.
+    pattern     is the grep pattern to filter.
+Note that ps -axu | grep pattern issued directly
+on the terminal will depend on terminal line length.
+This is not the case with this script.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Terminal attributes.
+ROWS=`stty -a | grep rows | awk ' { print $4 } '`
+ROWS1=`expr $ROWS - 1`
+COLUMNS=`stty -a | grep columns | awk ' { print $6 } '`
+COLUMNS1=`expr $COLUMNS - 1`
+export ROWS ROWS1
+export COLUMNS COLUMNS1
+
+# Trap.
+trap "echo -n \"[2J[${ROWS1};1H\"; exit 0" 1 2 3 15
+
+# Delay in seconds.
+DELAY=2
+
+# Options.
+CONT=no
+KILL=no
+USER=""
+while [ "$1" != "" ]
+do
+	case $1 in
+	-c|--contiguous|-contiguous)
+		shift
+		CONT=yes
+		;;
+	-k|--kill|kill)
+		shift
+		KILL=yes
+		;;
+	-u|--user|-user)
+		shift
+		USER="$1"
+		shift
+		;;
+	-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+# Pattern.
+PATTERN="${1}"
+
+# Command ps.
+case `uname` in
+FreeBSD|OpenBSD)
+	if [ "$USER" != "" ]
+	then
+		CMD="ps -U $USER -ax -ww -o user -o pid -o %mem -o %cpu -o command | \
+sort -n -k 2 | egrep -v -e \"$0|awk awk|ps -ax -ww -o user -o pid|sort -n -k 2\""
+	else
+		CMD="ps -ax -ww -o user -o pid -o %mem -o %cpu -o command | \
+sort -n -k 2 | egrep -v -e \"$0|awk awk|ps -ax -ww -o user -o pid|sort -n -k 2\""
+	fi
+	;;
+*)
+	echo "Unknown operating system"
+	exit $FAILURE
+	;;
+esac
+
+# Amend command with grep when specified.
+if [ "$PATTERN" != "" ]
+then
+	CMD="${CMD} | grep -i \"${PATTERN}\" | egrep -v -e \"grep -i\""
+fi
+
+# Contiguous or just once.
+if [ $CONT = yes ]
+then
+
+	# Repeat.
+	while true
+	do
+		echo -n "[1H"
+		eval ${CMD} | awk " { printf \"%-${COLUMNS}s\n\", substr(\$0, 1, $COLUMNS) } "
+		echo -n "[0J"
+		sleep $DELAY
+	done
+else
+
+	# Just once.
+	if [ $KILL = yes ]
+	then
+		eval ${CMD} | awk " { printf \"%-${COLUMNS}s\n\", substr(\$0, 1, $COLUMNS) } "
+		echo -n "The above processes will be killed, continue [y/n] "
+		read ANSWER
+		case $ANSWER in
+		[yY][eE][sS]|[yY])
+			;;
+		*)
+			echo "Execution canceled"
+			exit $FAILURE
+			;;
+		esac
+		eval ${CMD} | awk " { printf \"%-${COLUMNS}s\n\", substr(\$0, 1, $COLUMNS) } " | \
+			awk ' { print $2 } ' | \
+			while read PID REST
+			do
+				kill $PID
+			done
+		sleep 2
+		eval ${CMD} | awk " { printf \"%-${COLUMNS}s\n\", substr(\$0, 1, $COLUMNS) } " | \
+			awk ' { print $2 } ' | \
+			while read PID REST
+			do
+				kill -9 $PID
+			done
+	else
+		eval ${CMD} | awk " { printf \"%-${COLUMNS}s\n\", substr(\$0, 1, $COLUMNS) } "
+	fi
+fi
+
+# Finish.
+exit $SUCCESS
+

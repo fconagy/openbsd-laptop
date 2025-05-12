@@ -1,0 +1,6 @@
+/etc/wpa_supplicant.conf
+/root/etc/connect.conf
+/root/etc/connect.interface
+/root/etc/*.crt
+/root/mod
+/root/his

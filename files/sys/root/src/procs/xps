@@ -1,0 +1,34 @@
+#!/bin/sh
+
+# Show process.
+
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script is an alternate ps.
+Usage:
+    xps [-j][-k]
+where
+    -k      also shows kernel processes.
+    -j      user/system processes, arguments under process name.
+The default is user processes with arguments under process name.
+!EOF
+	exit 1
+	;;
+-k)
+	procs -k | sort -n -k 2 -k 1
+	;;
+-j)
+	procs -j | sort -n -k 2 -k 1
+	;;
+"")
+	procs
+	;;
+*)
+	echo "Wrong option"
+	exit 1
+	;;
+esac
+
+exit 0
+

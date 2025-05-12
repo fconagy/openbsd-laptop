@@ -1,0 +1,325 @@
+#!/bin/sh
+
+# Disk free space.
+
+# Constant.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|-help|--help)
+	cat <<!EOF
+This script reports disk free space.
+Usage:
+    dfs [-H][-b][-m][-g][-t][-s][-f fs]
+where
+    -H      do not print header on top.
+    -b      print size in blocks.
+    -m      print size in MB.
+    -g      print size in GB.
+    -t      print size in TB.
+    -p      print size in PB.
+    -s      print summary line at the bottom.
+    -f fs   pattern to match file system mount point name.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Get options.
+HEADER=yes
+BLOCK=no
+MB=yes
+GB=no
+TB=no
+PB=no
+SUM=no
+FS=""
+ARG=""
+while [ "$1" != "" ]
+do
+	case $1 in
+	-H)
+		shift
+		HEADER=no
+		;;
+	-b)
+		shift
+		MB=no
+		BLOCK=yes
+		;;
+	-m)
+		shift
+		MB=yes
+		;;
+	-g)
+		shift
+		MB=no
+		GB=yes
+		;;
+	-t)
+		shift
+		MB=no
+		TB=yes
+		;;
+	-p)
+		shift
+		MB=no
+		PB=yes
+		;;
+	-s)
+		shift
+		SUM=yes
+		;;
+	-f)
+		shift
+		FS="$1"
+		if [ "$FS" = "" ]
+		then
+			echo "You have to specify file system pattern"
+			exit $FAILURE
+		fi
+		shift
+		;;
+	-*)
+		echo "Unkown switch $1"
+		exit $FAILURE
+		;;
+	*)
+		if [ "$ARG" = "" ]
+		then
+			ARG="$1"
+		else
+			ARG="$ARG $1"
+		fi
+		shift
+		;;
+	esac
+done
+export HEADER BLOCK MB GB TB PB SUM FS ARG
+
+# Use proper df command.
+UNAME="`uname`"
+export UNAME
+case $UNAME in
+Linux)
+
+	# Linux df from binutils.
+	DF="df -k -P"
+
+	# File systems to ignore. Note the trailing space.
+	IGNORE="/lib/init/rw /dev/shm /dev "
+	;;
+*)
+
+	# Standard.
+	DF="df -k"
+	IGNORE=""
+	;;
+esac
+export DF IGNORE
+
+# Print statistics.
+$DF | egrep -v -e '^Filesystem' | awk '
+BEGIN {
+	uname = ENVIRON["UNAME"]
+	block = ENVIRON["BLOCK"]
+	mb = ENVIRON["MB"]
+	gb = ENVIRON["GB"]
+	tb = ENVIRON["TB"]
+	pb = ENVIRON["PB"]
+	sum = ENVIRON["SUM"]
+	fs = ENVIRON["FS"]
+	header = ENVIRON["HEADER"]
+	ignore = ENVIRON["IGNORE"]
+	if (header == "yes")
+	{
+		if (block == "yes")
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size blocks", "Used blocks", "Free blocks", "%"
+		}
+		else if (gb == "yes")
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size GB", "Used GB", "Free GB", "%"
+		}
+		else if (tb == "yes")
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size TB", "Used TB", "Free TB", "%"
+		}
+		else if (mb == "yes")
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size MB", "Used MB", "Free MB", "%"
+		}
+		else if (pb == "yes")
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size PB", "Used PB", "Free PB", "%"
+		}
+		else
+		{
+			printf "%20s %17s %17s %17s %3s\n",
+				"Mount point", "Size ??", "Used ??", "Free ??", "%"
+		}
+	}
+	sumsizeblk = 0
+	sumfreeblk = 0
+	sumusedblk = 0
+	sumsizemb = 0
+	sumfreemb = 0
+	sumusedmb = 0
+	sumsizegb = 0
+	sumfreegb = 0
+	sumusedgb = 0
+	sumsizetb = 0
+	sumfreetb = 0
+	sumusedtb = 0
+	sumsizepb = 0
+	sumfreepb = 0
+	sumusedpb = 0
+}
+ {
+	if (uname == "Linux")
+	{
+		size = $2
+		free = $4
+		used = size - free
+		mount = $6
+	}
+	else if (uname == "FreeBSD")
+	{
+		size = $2
+		free = $4
+		used = size - free
+		mount = $6
+	}
+	else if (uname == "OpenBSD")
+	{
+		size = $2
+		free = $4
+		used = size - free
+		mount = $6
+	}
+	else
+	{
+		size = $3
+		free = $2
+		used = size - free
+		mount = $7
+	}
+	if ((match(mount, fs) > 0) && (match(ignore, mount " ") == 0))
+	{
+		sizeblk = size * 2
+		freeblk = free * 2
+		usedblk = used * 2
+		sizemb = size / 1024
+		freemb = free / 1024
+		usedmb = used / 1024
+		sizegb = sizemb / 1024
+		freegb = freemb / 1024
+		usedgb = usedmb / 1024
+		sizetb = sizegb / 1024
+		freetb = freegb / 1024
+		usedtb = usedgb / 1024
+		sizepb = sizetb / 1024
+		freepb = freetb / 1024
+		usedpb = usedtb / 1024
+		sumsizeblk += sizeblk
+		sumfreeblk += freeblk
+		sumusedblk += usedblk
+		sumsizemb += sizemb
+		sumfreemb += freemb
+		sumusedmb += usedmb
+		sumsizegb += sizegb
+		sumfreegb += freegb
+		sumusedgb += usedgb
+		sumsizetb += sizetb
+		sumfreetb += freetb
+		sumusedtb += usedtb
+		sumsizepb += sizepb
+		sumfreepb += freepb
+		sumusedpb += usedpb
+		perc = ((size - free) / size) * 100.0
+		ml = 20
+		l = length(mount)
+		if (l > ml)
+		{
+			start = l - ml
+			mount = substr(mount,start,ml)
+		}
+		if (block == "yes")
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				mount, sizeblk, usedblk, freeblk, perc
+		}
+		else if (gb == "yes")
+		{
+			printf "%20s %17.2f %17.2f %17.2f %3d\n", \
+				mount, sizegb, usedgb, freegb, perc
+		}
+		else if (mb == "yes")
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				mount, sizemb, usedmb, freemb, perc
+		}
+		else if (tb == "yes")
+		{
+			printf "%20s %17.3f %17.3f %17.3f %3d\n", \
+				mount, sizetb, usedtb, freetb, perc
+		}
+		else if (pb == "yes")
+		{
+			printf "%20s %17.3f %17.3f %17.3f %3d\n", \
+				mount, sizepb, usedpb, freepb, perc
+		}
+		else
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				mount, sizemb, usedmb, freemb, perc
+		}
+	}
+}
+END {
+	if (sum == "yes")
+	{
+		sumperc = ((sumsizemb - sumfreemb) / sumsizemb) * 100.0
+		if (block == "yes")
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				"Total_blk", sumsizeblk, sumusedblk, sumfreeblk, sumperc
+		}
+		else if (gb == "yes")
+		{
+			printf "%20s %17.2f %17.2f %17.2f %3d\n", \
+				"Total_GB", sumsizegb, sumusedgb, sumfreegb, sumperc
+		}
+		else if (mb == "yes")
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				"Total MB", sumsizemb, sumusedmb, sumfreemb, sumperc
+		}
+		else if (tb == "yes")
+		{
+			printf "%20s %17.3f %17.3f %17.3f %3d\n", \
+				"Total_TB", sumsizetb, sumusedtb, sumfreetb, sumperc
+		}
+		else if (pb == "yes")
+		{
+			printf "%20s %17.3f %17.3f %17.3f %3d\n", \
+				"Total_PB", sumsizepb, sumusedpb, sumfreepb, sumperc
+		}
+		else
+		{
+			printf "%20s %17d %17d %17d %3d\n", \
+				"Total_??", sumsizemb, sumusedmb, sumfreemb, sumperc
+		}
+	}
+} '
+
+# Finish.
+exit $SUCCESS
+

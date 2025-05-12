@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Show temperature and fan rpm.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script prints temperature, fan RPM and battery life.
+Usage:
+    ft
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Get sysctl values.
+sysctl -n hw.sensors.asmc0.fan0 | sed 's/ (.*$//'
+sysctl -n hw.sensors.cpu0
+sysctl -n hw.sensors.acpisbs0.percent0 | sed 's/% .*$/%/'
+
+# Finish.
+exit $SUCCESS
+

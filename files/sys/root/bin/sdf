@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# Show differences.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script shows differences between the saved and
+the current directories.
+Usage
+    sdf [-q|-a] file...
+where
+    -q      quiet, don't show diff.
+    -a      all files in the current save directory.
+    file    name of the file, we should be in a save
+            directory.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Options.
+QUIET=no
+FORCE=no
+case $1 in
+-q|--quiet|-quiet)
+	QUIET=yes
+	shift
+	;;
+-f|--force|-force)
+	FORCE=yes
+	shift
+	;;
+-a|--all|-all)
+	shift
+	$0 -q * | egrep -v -e 'same$' | egrep -v -e 'newer$'
+	exit $FAILURE
+	;;
+-*)
+	echo "Unknown switch $1"
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+if [ "$1" = "" ]
+then
+	echo "Specify file name"
+	exit $FAILURE
+fi
+
+# Diff output.
+DIFF=sdf.diff
+
+# Home and save.
+HOME=/root
+SAVE=/root/save/chios-root
+HOMESED="`echo $HOME | sed 's./.\\\/.g'`"
+SAVESED="`echo $SAVE | sed 's./.\\\/.g'`"
+HOMEPART=$(pwd | sed "s%^${SAVESED}%%")
+SAVEPART=$(pwd | sed "s%^${HOMESED}%%")
+
+# Are we currently under the save directory tree?
+UNDERSAVE=no
+if pwd | egrep -e "^${SAVE}" >/dev/null
+then
+	UNDERSAVE=yes
+fi
+
+# Are we under home (the two might overlap).
+UNDERHOME=no
+if pwd | egrep -e "^${HOME}" >/dev/null
+then
+	UNDERHOME=yes
+fi
+
+# Check.
+if [ $UNDERSAVE = no ]
+then
+	echo "Have to be under the save directory $SAVE"
+	exit $FAILURE
+fi
+
+# For all files as args.
+for F in $*
+do
+
+	# Get file names.
+	NAME="$F"
+	HOMEFILE=${HOME}${HOMEPART}/${NAME}
+	SAVEFILE=${HOME}${SAVEPART}/${NAME}
+
+	# Checks.
+	NODIFF=no
+	if [ ! -e $SAVEFILE ]
+	then
+		echo "$SAVEFILE notfound"
+		NODIFF=yes
+	fi
+	if [ ! -e $HOMEFILE ]
+	then
+		echo "$HOMEFILE notfound"
+		NODIFF=yes
+	fi
+	if [ $HOMEFILE -nt $SAVEFILE ]
+	then
+		if [ $FORCE != yes ]
+		then
+			echo "$HOMEFILE newer"
+			NODIFF=yes
+		else
+			:
+		fi
+	fi
+
+	# Show diff.
+	if [ $NODIFF != yes ]
+	then
+		echo "" >$DIFF
+		echo "==== $SAVEFILE $HOMEFILE" >>$DIFF
+		echo "" >>$DIFF
+		if diff $SAVEFILE $HOMEFILE >>$DIFF
+		then
+			if [ $QUIET = yes ]
+			then
+				echo "$HOMEFILE same"
+			else
+				echo "==== $HOMEFILE same"
+			fi
+		else
+			if [ $QUIET = yes ]
+			then
+				echo "$HOMEFILE different"
+			else
+				cat $DIFF | more
+			fi
+		fi
+	fi
+done
+
+# Finish.
+rm -f $DIFF
+exit $SUCCESS
+

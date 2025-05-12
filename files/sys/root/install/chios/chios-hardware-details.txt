@@ -1,0 +1,16 @@
+
+
+    Hardware
+
+It is a Dell Latitude E4200 laptop.
+  BIOS Version: A24
+  Service tag: F2M974J
+  Processor: Intel Core2 Duo U9400 1.40 GHz
+  Memory: 3 GB
+  Graphics: Intel GM45 1280x800
+  Disk: 128 GB Samsung SSD THIN VAM0 as sd0
+  Audio: IDT 92HD71
+  WiFi: Intel wireless
+  Broadband: Dell wireless 5530 HSPA mobile broadband minicard.
+  Integrated NIC MAC: 00-21-70-D8-8B-25
+

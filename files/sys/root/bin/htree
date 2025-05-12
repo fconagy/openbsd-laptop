@@ -1,0 +1,114 @@
+#!/bin/sh
+
+# Quit on error.
+set -e
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script creates the /h directory tree.
+For every group creates a subdirectory under the
+designated mount point. Will create a symbolic
+link under /h for that directory. Will set the
+group sticky bit on all subdirectories. Note that
+not all file systems support the group sticky
+semantics. Will process only the users for which
+the primary group is the specified group.
+Usage:
+    htree mountpoint groups...
+where
+    mountpoint  is the mount point of the user disk.
+                The default is /h/mnt/user90.
+    groups      is the groups to be defined. They should
+                be already in /etc/group. The default is
+                'admin' and 'users'.
+                OpenBSD has group 'users' already defined.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Mount point.
+MNT="$1"
+if [ "$MNT" = "" ]
+then
+	MNT=/usr/user90
+else
+	MNT="$1"
+	shift
+fi
+if [ ! -d $MNT ]
+then
+	echo "Cannot find $MNT"
+	exit $FAILURE
+fi
+
+# List of groups.
+GROUPS="$*"
+if [ "$GROUPS" = "" ]
+then
+	GROUPS="admins users"
+fi
+
+# Home root.
+HR=/h
+
+# Set permissions.
+
+fix() {
+	cd $HR/$1
+	chown -P -R $2 $2
+	chgrp -P -R $1 $2
+	chmod g+s $2
+	find $2 -type d -exec chmod g+s {} \;
+}
+
+# Create directory structure.
+if [ ! -d $HR ]
+then
+	mkdir $HR
+fi
+for G in $GROUPS
+do
+	GD=$MNT/$G
+	GL=$HR/$G
+	if [ ! -d $GD ]
+	then
+		mkdir -p $GD
+	fi
+	if [ ! -L $GL ]
+	then
+		ln -s $GD $GL
+	fi
+done
+
+# Set ownership and protections.
+for G in $GROUPS
+do
+
+	# Get GID of group G.
+	GID="`grep "^${G}:" /etc/group | cut -d ':' -f 3 || true`"
+
+	# Users with primary group G.
+	if [ "$GID" != "" ]
+	then
+		printf "$G"
+		USERS="`cat /etc/passwd | awk -F ':' ' { print $4, $1 } ' | \
+			grep \"^${GID} \" | awk ' { print $2 } ' || true`"
+		for U in $USERS
+		do
+			printf " $U"
+			fix $G $U
+		done
+		printf "\n"
+	fi
+done
+
+# Finish.
+exit $SUCCESS
+

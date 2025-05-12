@@ -1,0 +1,125 @@
+#!/bin/sh
+
+# Print PostScript on local USB printer.
+# This is wired to applications, there are
+# issues with the lpd setup so we use this.
+# This works with the printd daemon.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script prints one file on the locally connected PostScript printer.
+Usage:
+    psprint [file]
+When no file specified the default is stdin.
+!EOF
+	exit $FAILURE
+esac
+
+# Spool directory.
+SPOOL=/var/spool/output/print
+if [ ! -d $SPOOL ]
+then
+	echo "There is no spool - confused"
+	exit $FAILURE
+fi
+
+# Options.
+while [ "${1}" != "" ]
+do
+
+	# Check.
+	case "${1}" in
+	*[!-_a-zA-Z0-9]*)
+		log "Alien characters"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`/bin/echo \"${1}\" | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 128 ]
+	then
+		log "Too long"
+		exit $FAILURE
+	fi
+
+	# Options, like lpr.
+	case "${1}" in
+	-P*)
+
+		# Printer specified. There is only one: ours.
+		if [ "${1}" = "-P" ]
+		then
+
+			# Skip printer name.
+			shift
+			shift
+		else
+			shift
+		fi
+		;;
+	-l)
+
+		# List.
+		ls $SPOOL
+		exit $SUCCESS
+		;;
+	-*)
+
+		# Skip.
+		shift
+		echo "Unknown switch"
+		exit $FAILURE
+		;;
+	*)
+
+		# It is a file name.
+		break
+		;;
+	esac
+done
+
+# File to print.
+F="${1}"
+if [ "${F}" = "" ]
+then
+
+	# File not specified, use stdin.
+	F="${SPOOL}/stdin.$$.ps"
+	/bin/cat >"${F}"
+	if [ $? -ne 0 ]
+	then
+		echo "Error processing ${F}"
+		exit $FAILURE
+	fi
+else
+
+	# Log.
+	log "Printing ${F}"
+
+	# Stick it into the spool.
+	if [ ! -f "${F}" ]
+	then
+		echo "No file ${F}"
+		exit $FAILURE
+	fi
+	if [ -r "${SPOOL}/${F}" ]
+	then
+		echo "Spool file already there ${F} - confused"
+		exit $FAILURE
+	fi
+	/bin/cp "${F}" "${SPOOL}/"
+	if [ $? -ne 0 ]
+	then
+		echo "Error processing ${F}"
+		exit $FAILURE
+	fi
+fi
+
+# Finish.
+exit $SUCCESS
+

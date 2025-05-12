@@ -1,0 +1,17 @@
+
+use -xpf to restore the tarball.
+
+mtree
+
+setuids
+
+disable gvfs
+
+amlrng
+enqueue_randomness
+
+Debugging:
+lldb --core corefile executable
+  target create "executablename" --core "corefile"
+  bt
+

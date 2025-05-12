@@ -1,0 +1,49 @@
+#!/bin/sh
+
+# Stupid script to watch.
+# Will miss a lot.
+
+# Sleep time. In microseconds.
+DELAY=100000
+
+# Temp files.
+T1=x.1
+T2=x.2
+
+# Exit.
+trap 'rm -f x.1 x.2; exit 0' 1 2 3 15
+
+# What to look for.
+WHAT="$1"
+case $WHAT in
+-*)
+	echo "No switches"
+	exit 1
+	;;
+esac
+
+# Just look processes.
+while true
+do
+	procs -k >$T1
+	usleep $DELAY
+	procs -k >$T2
+	diff $T1 $T2 2>&1 | \
+		egrep -v -e ' procs$' | \
+		while read MARK PID UID CMD REST
+	do
+		if [ "$CMD" != "" ]
+		then
+			STAMP="`date +%Y%m%dT%H%M%S`"
+			printf "$STAMP %8d %8d %s %s\n" "$PID" "$UID" "$CMD" "$REST"
+			if [ "$WHAT" != "" ]
+			then
+				if echo "$CMD" | grep "$WHAT" >/dev/null
+				then
+					ps -j | grep "$CMD"
+				fi
+			fi
+		fi
+	done
+done
+

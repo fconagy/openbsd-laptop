@@ -1,0 +1,42 @@
+#!/bin/sh
+
+# Lists the files that had been changed today.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script prints the names of the files which were changed today.
+Frequently changing files like library things and mail folders
+are removed from the list.
+Usage:
+    today [directory]
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Remove stuff got changed all the time.
+# Cut inode and size in blocks.
+if [ "$1" = "" ]
+then
+	cd $HOME
+	find . -mtime -1 -ls
+else
+	if [ ! -d $1 ]
+	then
+		echo "Cannot find directory $1"
+		exit $FAILURE
+	fi
+	cd $1
+	find . -mtime -1 -ls | \
+		sed 's/^[0-9]*[ ]*//; s/^[0-9]*[ ]*//; s/^[0-9]*[ ]*//'
+fi
+
+# Finish.
+exit $SUCCESS
+

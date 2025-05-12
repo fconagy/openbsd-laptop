@@ -1,0 +1,42 @@
+#!/bin/sh
+
+# Restart xdm.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script restarts xenodm.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Kill.
+XDM=/usr/X11R6/bin/xenodm
+PID="`ps -axu | grep $XDM | grep -v grep | awk ' { print $2 } '`"
+if [ "$PID" != "" ]
+then
+	kill $PID
+	sleep 1
+	PID="`ps -axu | grep $XDM | grep -v grep | awk ' { print $2 } '`"
+	if [ "$PID" != "" ]
+	then
+		kill -9 $PID
+		sleep 1
+	fi
+	$XDM
+else
+	echo "Not running, starting it"
+	sleep 1
+	$XDM
+	exit $FAILURE
+fi
+
+# Finish.
+exit $SUCCESS
+

@@ -1,0 +1,358 @@
+#!/bin/sh
+
+# Config copy directory distribute and update.
+
+# Status.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+	cat <<!EOF
+This script updates a config directory copy tree of system files or
+distributes those files. It is intended to be used when new files are
+added to system areas.
+Usage:
+    conf [help|list|dir|diff|distribute|import [file]|update] [systemname]
+where
+    help                list this help.
+    list                list files under config directory.
+    check               show which files would be update from the system
+                        with conf update.
+    dir                 same as list.
+    diff                show differences.
+    distribute          distribute config files from saved config directory
+                        to the system. This will overwrite system files!
+    distribute save     same as above but save before distribute.
+    import [file]       import all modified config files from under the 'mod'
+                        utility or import any named file. When there is a file
+                        name given it should be an absolute pathname starting
+                        with slash. Otherwise it will be interpreted as a
+                        system name.
+    update              update saved config directory files with latest
+                        changes from the system.
+    save                Save one system file. These saved files are not included
+                        in the other operations.
+    systemname          is an optional argument, the default is the unqualified
+                        host name.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Host name.
+HN="`hostname | sed 's/\..*$//'`"
+
+# Argument.
+OP=list
+case $1 in
+list|-l|--list|-list)
+	OP=list
+	shift
+	;;
+dir|-d|--dir|-dir)
+	OP=list
+	shift
+	;;
+check|-c|--check|-check)
+	OP=check
+	shift
+	;;
+update|-u|--update|-update)
+	OP=update
+	shift
+	;;
+diff|-D|--diff|-diff)
+	OP=diff
+	shift
+	;;
+distribute|-d|--distribute|-distribute)
+	OP=distribute
+	shift
+	SAVE=no
+	case $2 in
+	save|-s|--save|-save)
+		SAVE=yes
+		shift
+		;;
+	esac
+	;;
+import)
+	OP=import
+	shift
+
+	# If there is a full path filename comes.
+	case $1 in
+	/*)
+
+		# Pathname.
+		FROMFILE="$1"
+		;;
+	*)
+
+		# Not full path, assumed to be host specification.
+		FROMFILE=""
+		;;
+	esac
+	;;
+edit)
+	OP=edit
+	shift
+	CN="$HN"
+	;;
+"")
+	OP=list
+	;;
+*)
+	echo "Unknown operation $1"
+	exit $FAILURE
+	;;
+esac
+
+# Config name, default is the host name.
+if [ "$CN" = "" ]
+then
+	CN=$HN
+fi
+CONF=$HOME/conf/$CN
+if [ ! -d $CONF ]
+then
+	echo "Cannot find config directory $CONF"
+	exit $FAILURE
+fi
+
+# Create file list.
+cd $CONF
+if [ $? -ne 0 ]
+then
+	echo "Could not cd to $CONF"
+	exit $FAILURE
+fi
+TMPDIR=$HOME/tmp
+if [ ! -d $TMPDIR ]
+then
+	mkdir $TMPDIR
+fi
+UPDATED=$TMPDIR/updated.$$.tmp
+DIFFERENT=$TMPDIR/different.$$.tmp
+TOEDIT=$TMPDIR/toedit.$$.tmp
+echo "0" >$UPDATED
+echo "0" >$DIFFERENT
+rm -f $TOEDIT
+echo "Using $CONF"
+find . -type f -print | while read FN REST
+do
+
+	# Source file.
+	FROM="`echo $FN | sed 's/^\.//'`"
+
+	# Destination file.
+	TO=${CONF}${FROM}
+
+	case $OP in
+	list)
+		#stat -f '%10Sp %2l %8Su %8Sg %10z %Sc %N' $FN
+		stat -f '%10Sp %8Su %8Sg %Sm %N' -t '%Y-%m-%dT%H:%M' $FN
+		;;
+	diff)
+		if [ -r $TO ]
+		then
+			diff $FROM $TO
+			if [ $? = 0 ]
+			then
+				printf "%s same\n" $FROM
+			else
+				printf "%s differs\n" $FROM
+				D="`cat $DIFFERENT`"
+				D="`expr $D + 1`"
+				echo $D >$DIFFERENT
+			fi
+		else
+			printf "%s not in system" $TO
+		fi
+		;;
+	check)
+
+		# Check if needs update from the system.
+		if [ ! -r $FROM ]
+		then
+			printf "%s not-to-be-found\n" $FROM
+		else
+			if diff $FROM $TO >/dev/null 2>&1
+			then
+				DIFF=same
+			else
+				DIFF=differ
+				D="`cat $DIFFERENT`"
+				D="`expr $D + 1`"
+				echo $D >$DIFFERENT
+			fi
+			if [ $FROM -nt $TO ]
+			then
+				printf "%s needs-to-be-updated $DIFF\n" $FROM
+				U="`cat $UPDATED`"
+				U="`expr $U + 1`"
+				echo $U >$UPDATED
+			else
+				printf "%s up-to-date $DIFF\n" $FROM
+			fi
+		fi
+		;;
+	update)
+
+		# Copy when not up to date.
+		if [ ! -r $FROM ]
+		then
+			printf "%s not-to-be-found\n" $FROM
+		else
+			if [ $FROM -nt $TO ]
+			then
+				cp -p $FROM $TO
+				if [ $? -ne 0 ]
+				then
+					echo "Error updating $TO"
+					exit $FAILURE
+				fi
+				printf "%s updated\n" $FROM
+				U="`cat $UPDATED`"
+				U="`expr $U + 1`"
+				echo $U >$UPDATED
+			else
+				:
+				#printf "%s up-to-date\n" $FROM
+			fi
+		fi
+		;;
+	import)
+
+		# If there is a file specified use that.
+		if [ "$FROMFILE" = "" ]
+		then
+			LCMD="mod dir"
+		else
+			LCMD="echo ignore ${FROMFILE}"
+		fi
+		$LCMD | while read DATE FROM REST
+		do
+			TO=${CONF}${FROM}
+			TODIR="`dirname $TO`"
+			if [ ! -d $TODIR ]
+			then
+				mkdir -p $TODIR
+				if [ $? -ne 0 ]
+				then
+					echo "Cannot create $TODIR"
+					exit $FAILURE
+				fi
+			fi
+			cp -p $FROM $TO
+			if [ $? -ne 0 ]
+			then
+				echo "Import of $FROM failed"
+				exit $FAILURE
+			else
+				printf "%s imported\n" $FROM
+			fi
+		done
+		exit $SUCCESS
+		;;
+	distribute)
+
+		# Distribute, copy files into their place.
+		# Opposite order! FROM will be overwritten.
+		D="`dirname $FROM`"
+		if [ ! -d $D ]
+		then
+			mkdir -p $D
+			if [ $? -ne 0 ]
+			then
+				echo "Cannot create directory $D"
+				exit $FAILURE
+			fi
+		fi
+
+		# Create .orig saved copy if not there yet.
+		if [ $SAVE = yes ]
+		then
+			ORIG=$TO.orig
+			if [ ! -r $ORIG ]
+			then
+				cp -p $TO $ORIG
+				if [ $? -ne 0 ]
+				then
+					echo "Error saving $TO"
+					exit $FAILURE
+				fi
+			fi
+		fi
+
+		# Overwrite with new file.
+		cp -p $TO $FROM
+		if [ $? -ne 0 ]
+		then
+			echo "Error distributing $FROM"
+			exit $FAILURE
+		fi
+		printf "%s written\n" $FROM
+		;;
+	edit)
+
+		# Edit matching config files in the system.
+		EFN="`echo $FN | sed 's/^\.//'`"
+		if echo $EFN | grep $1 >/dev/null 2>&1
+		then
+
+			# There is a match.
+			echo "$EFN" >>$TOEDIT
+		fi
+		;;
+	esac
+done
+
+# Print summary.
+case $OP in
+edit)
+
+	# We got a list of files to edit.
+	if [ "$EDITOR" = "" ]
+	then
+		EDITOR=vi
+	fi
+	for F in `cat $TOEDIT | paste -`
+	do
+		echo "Editing $F"
+		sleep 1
+		$EDITOR $F
+	done
+	;;
+check)
+	U="`cat $UPDATED`"
+	if [ $U -gt 0 ]
+	then
+		echo "$U file(s) needs to be updated"
+	fi
+	D="`cat $DIFFERENT`"
+	if [ $D -gt 0 ]
+	then
+		echo "$D file(s) seem to be different"
+	fi
+	;;
+*)
+	U="`cat $UPDATED`"
+	if [ $U -gt 0 ]
+	then
+		echo "$U file(s) had been updated"
+	fi
+	D="`cat $DIFFERENT`"
+	if [ $D -gt 0 ]
+	then
+		echo "$D file(s) are found to be different"
+	fi
+	;;
+esac
+
+# Finish.
+rm -f $DIFFERENT $UPDATED $TOEDIT
+exit $SUCCESS
+

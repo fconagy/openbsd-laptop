@@ -1,0 +1,209 @@
+#!/bin/sh
+
+# Print dependencies for a package.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script prints dependencies for a package.
+    pkg-depend [-p][-r][-t] [pkg...]
+where
+    -p          show only prereqs needed to be installed.
+    -r          recursive, with depth limited to 6.
+    -t          show tree formatted output. Otherwise
+                it will show a sorted unified list.
+    pkg         is the name of the package.
+If more than one name matches than that is an error.
+Try to specify exact match then.
+You have to specify switches first, then arguments.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Log file and list file.
+LOG=pkg-depend.log
+LIST=pkg-depend.list
+rm -f $LIST $LOG
+touch $LIST
+
+# Check.
+
+pkgcheck()
+{
+	NP="`pkg_info -Q $1 | wc -l`"
+	if [ $NP -eq 0 ]
+	then
+		echo "Cannot find package $1"
+		exit $FAILURE
+	fi
+	if [ $NP -gt 1 ]
+	then
+		echo "More than one package matches"
+		pkg_info -Q $PKG | sed 's/^/    /'
+		exit $FAILURE
+	fi
+}
+
+# List dependencies.
+
+depends() {
+	if [ "$1" != "" ]
+	then
+		pkg_info -f $1 | grep '^@depend' | sed 's/^.*://'
+	fi
+}
+
+# Required by a package.
+
+required() {
+	if [ "$1" != "" ]
+	then
+		depends $1 | while read REQ
+		do
+			if [ "$REQ" != "" ]
+			then
+				if [ -d /var/db/pkg/$REQ ]
+				then
+					:
+				else
+					echo "$REQ"
+					printf "%s %s\n" "$1" "$REQ" >>$LIST
+				fi
+			fi
+		done
+	fi
+}
+
+# Print dependencies indented.
+
+printdep()
+{
+	INDENT="`expr $1 \* 2`"
+	if [ "$2" != "" ]
+	then
+		printf "%${INDENT}s%s\n" "" "$2"
+	fi
+}
+
+# Trying to do recursive dependencies but not in a good way.
+
+rdep ()
+{
+	P0="$1"
+	printdep 0 "$P0"
+	required "$P0" | \
+		while read P1
+	do
+		printdep 1 "$P1"
+		required "$P1" | \
+			while read P2
+		do
+			printdep 2 "$P2"
+			required "$P2" | \
+				while read P3
+			do
+				printdep 3 "$P3"
+				required "$P3" | \
+					while read P4
+				do
+					printdep 4 "$P4"
+					required "$P4" | \
+						while read P5
+					do
+						printdep 5 "$P5"
+						required "$P5" | \
+							while read P6
+						do
+							printdep 6 "$P6"
+						done
+					done
+				done
+			done
+		done
+	done
+}
+
+# Print curated list.
+
+RECURSIVE=no
+PREREQ=no
+TREE=no
+while [ "$1" != "" ]
+do
+	case $1 in
+	-p|--prereq|-prereq)
+		PREREQ=yes
+		shift
+		;;
+	-r|--recursive|-recursive)
+		RECURSIVE=yes
+		shift
+		;;
+	-t|--tree|-tree)
+		TREE=yes
+		shift
+		;;
+	-*)
+		echo "Illegal switch $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+# Check.
+for PKG in $*
+do
+	pkgcheck $PKG
+done
+
+# All packages.
+for PKG in $*
+do
+	if [ $RECURSIVE = yes ]
+	then
+
+		# Recursive dependencies.
+		if [ $TREE = yes ]
+		then
+
+			# Print tree formatted list.
+			# There might be duplicates.
+			rdep $PKG
+		else
+
+			# Process tree muted.
+			rdep $PKG >/dev/null
+
+			# Result is in the list file.
+			cat $LIST | awk ' { print $2 } ' | sort -u
+		fi
+	else
+
+		# Just one level simple dependency.
+		if [ $PREREQ = yes ]
+		then
+
+			# Print oly the prereqs which would be installed.
+			required $PKG
+		else
+
+			# Print all.
+			depends $PKG
+		fi
+	fi
+done
+
+# Finish.
+rm -f $LIST
+rm -f $LOG
+exit $SUCCESS
+

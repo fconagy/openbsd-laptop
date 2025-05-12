@@ -1,0 +1,181 @@
+#!/bin/sh
+
+# Simple directory compare.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script tries to compare two directories.
+Usage:
+    dirdiff [-p|-1|-2] dir1 dir2
+where
+    -p      print the differences
+    -1      report only for the first directory
+    -2      report only for the second directory
+When using -1 or -2 directories which are the same
+not reported. You can specify both -1 and -2 the same
+time.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Options.
+PRINTDIFF=no
+FIRST=no
+SECOND=no
+while [ "$1" != "" ]
+do
+	case $1 in
+	-p|--print)
+		PRINTDIFF=yes
+		shift
+		;;
+	-1|--1)
+		FIRST=yes
+		shift
+		;;
+	-2|--2)
+		SECOND=yes
+		shift
+		;;
+	-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	*)
+
+		# Argument.
+		break
+		;;
+	esac
+done
+
+# Directories.
+D1="$1"
+D2="$2"
+if [ "$D1" = "" -o "$D2" = "" ]
+then
+	echo "Specify two directories"
+	exit $FAILURE
+fi
+if [ ! -e $D1 ]
+then
+	echo "Cannot find $D1"
+	exit $FAILURE
+fi
+if [ ! -e $D2 ]
+then
+	echo "Cannot find $D2"
+	exit $FAILURE
+fi
+if [ ! -d $D1 ]
+then
+	echo "$D1 not a directory"
+	exit $FAILURE
+fi
+if [ ! -d $D2 ]
+then
+	echo "$D2 not a directory"
+	exit $FAILURE
+fi
+
+# Logs.
+LOG=dirdiff.log
+rm -f $LOG
+DLOG1=dirdiff1.diff
+DLOG2=dirdiff2.diff
+rm -f $LOG $DLOG1 $DLOG2
+
+# Set up trap.
+trap "echo Cancelled; rm -f $LOG $DLOG1 $DLOG2; exit $FALURE" 1 2 3 15
+
+# Find pairs of files.
+for F in $D1/*
+do
+	N="`basename $F`"
+	N1=$D1/$N
+	N2=$D2/$N
+	if [ -e $N2 ]
+	then
+		if diff $N1 $N2 >>$DLOG1 2>&1
+		then
+			echo "$N same"
+		else
+			echo "$N differs"
+			echo "==== $N differs as above" >>$DLOG1
+			echo "" >>$DLOG1
+		fi
+	else
+		echo "$N no pair in $D2"
+	fi
+done >>$LOG
+for F in $D2/*
+do
+	N="`basename $F`"
+	N1=$D1/$N
+	N2=$D2/$N
+	if [ -e $N1 ]
+	then
+		if diff $N2 $N1 >>$DLOG2 2>&1
+		then
+			echo "$N same"
+		else
+			echo "$N differs"
+			echo "==== $N differs as above" >>$DLOG2
+			echo "" >>$DLOG2
+		fi
+	else
+		echo "$N no pair in $D1"
+	fi
+done >>$LOG
+
+# Print file names with notices.
+NONUMBER=yes
+if [ $FIRST = yes ]
+then
+	NONUMBER=no
+	cat $LOG | sort -u | egrep -e " ${D1}$| differs$"
+fi
+if [ $SECOND = yes ]
+then
+	NONUMBER=no
+	cat $LOG | sort -u | egrep -e " ${D2}$| differs$"
+fi
+if [ $NONUMBER = yes ]
+then
+	cat $LOG | sort -u
+fi
+
+# Print diff for files if asked.
+if [ $PRINTDIFF = yes ]
+then
+	if [ $FIRST = yes ]
+	then
+		echo "==== Differences comparing $D1 ===="
+		cat $DLOG1
+	fi
+	if [ $SECOND = yes ]
+	then
+		echo "==== Differences comparing $D2 ===="
+		cat $DLOG2
+	fi
+	if [ $NONUMBER = yes ]
+	then
+		echo "==== Differences comparing $D1 ===="
+		cat $DLOG1
+		echo "==== Differences comparing $D2 ===="
+		cat $DLOG2
+	fi
+	echo "==== End of differences ===="
+fi
+
+# Finish.
+rm -f $LOG $DLOG1 $DLOG2
+exit $SUCCESS
+

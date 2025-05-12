@@ -1,0 +1,180 @@
+#!/bin/sh
+
+# Copy directory tree.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Help.
+case $1 in
+-h|-help|--help)
+	cat <<!EOF
+This script copies a directory tree, including links and everthyng.
+Usage:
+    dircopy [-f] fromdir todir
+where
+    fromdir             is the directory to copy from.
+    todir               is the directory to copy to. Must be created
+                        beforehand.
+!EOF
+    exit $FAILURE
+    ;;
+esac
+
+# Create fullpath.
+
+get_filename() {
+	FILE=$1
+	FILENAME="`basename $FILE`"
+	FILEDIR="`dirname $FILE`"
+
+	# Base directory.
+	case $FILEDIR in
+	/*)
+		DIR=$FILEDIR
+		;;
+	.)
+		DIR=`pwd`
+		;;
+	*)
+		DIR=`pwd`/$FILEDIR
+		;;
+	esac
+	if [ "$DIR" = "/" ]
+	then
+		FILE=/$FILENAME
+	else
+		FILE=$DIR/$FILENAME
+   	fi
+}
+
+# Print without new line.
+
+echon() {
+	case `uname` in
+	Linux)
+		echo -n "$* "
+		;;
+	AIX)
+		echo "$* \c"
+		;;
+	*)
+		echo -n "$* "
+		;;
+	esac
+}
+
+# Tar command.
+case `uname` in
+OpenBSD)
+
+	# This is based on libarchive, supports long file names.
+	TAR="bsdtar --format gnutar -cf -"
+	#XTAR="bsdtar -xpf -"
+	XTAR="bsdtar -xf -"
+	;;
+Linux)
+
+	# This should be gnutar.
+	TAR="tar -cf -"
+	XTAR="tar -xpBf -"
+	;;
+*)
+
+	# Default. Old style.
+	TAR="tar cf -"
+	XTAR="tar xpBf -"
+	;;
+esac
+
+# Ask as per default.
+FORCED=no
+
+# Deal with ctrl/c.
+trap 'echo ""; echo Operation canceled; exit 1' 1 2
+
+# Get file name, really old style.
+get_filename $1
+FROM=$FILE
+get_filename $2
+TO=$FILE
+
+# Check.
+if [ ! -d $FROM ]
+then
+	echo "Cannot find directory $FROM to copy from"
+	exit $FAILURE
+fi
+if [ ! -d $TO ]
+then
+	if [ "$FORCED" = "yes" ]
+	then
+		echo "Cannot find destination directory $TO"
+		exit $FAILURE
+	else
+		echo "You must create directory $TO"
+		echon "Should I create it? [n]"
+		read SURE
+		case $SURE in
+		y|yes)
+			mkdir $TO
+			if [ ! -d $TO ]
+			then
+				echo "Directory $TO not created - confused"
+				exit $FAILURE
+			fi
+			;;
+		*)
+			echo "Execution canceled"
+			exit $FAILURE
+			;;
+		esac
+	fi
+fi
+if [ ! -r $FROM ]
+then
+	echo "Unable to access files in directory $FROM"
+	exit $FAILURE
+fi
+if [ ! -w $TO ]
+then
+	echo "Unable to write to $TO"
+	exit $FAILURE
+fi
+if [ "$FROM" = "$TO" ]
+then
+	echo "$FROM and $TO are the same"
+	exit $FAILURE
+fi
+
+# More check.
+if [ "$FORCED" = "yes" ]
+then
+	SURE=yes
+else
+	ls -C $FROM
+	echo "Directory tree $FROM"
+	echo "Will be copied to $TO"
+	echon "Do you wish to continue? (y/n)? [n]"
+	read SURE
+fi
+
+# Copy.
+case $SURE in
+y|yes)
+	CURRENT=`pwd`
+	cd $FROM
+	($TAR .; exit 0) | (cd $TO; $XTAR )
+	STATUS=$?
+	cd $CURRENT
+	;;
+*)
+	echo "Execution canceled"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $STATUS
+

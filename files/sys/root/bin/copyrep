@@ -1,0 +1,166 @@
+#!/bin/sh
+
+# Report how the copy goes.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script shows the progress of a copy.
+Usage:
+    copyrep [-d delay][-l length] source destination
+where
+    -d delay    is the cycle delay time.
+    -l length   is the length of the graph line.
+    source      is the source file.
+    destination is the destination.
+Will report the progess, in percentage and
+the speed in MB/s. Also will show the progress
+graphically. Note that you have to specify the switches
+first.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Options.
+DELAY=10
+LINELEN=40
+while [ "$1" != "" ]
+do
+	case $1 in
+	-d|--delay|-delay)
+		shift
+		DELAY="$1"
+		if [ "$DELAY" = "" ]
+		then
+			echo "Specify delay"
+			exit $FAILURE
+		fi
+		shift
+		;;
+	-l|--linelength|-linelength)
+		shift
+		LINELEN="$1"
+		if [ "$LINELEN" = "" ]
+		then
+			echo "Specify line length"
+			exit $FAILURE
+		fi
+		shift
+		;;
+	-*)
+		echo "Unknown option $1"
+		exit $FAILURE
+		;;
+	*)
+
+		# Argument.
+		break
+		;;
+	esac
+done
+
+# Source and destination.
+SOURCE="$1"
+if [ "$SOURCE" = "" ]
+then
+	echo "Specify source"
+	exit $FAILURE
+fi
+if [ ! -r $SOURCE ]
+then
+	echo "Cannot find $SOURCE"
+	exit $FAILURE
+fi
+DEST="$2"
+if [ "$DEST" = "" ]
+then
+	echo "Specify destination"
+	exit $FAILURE
+fi
+if [ ! -r $DEST ]
+then
+	echo "Cannot find $DEST"
+	exit $FAILURE
+fi
+
+# Trap.
+trap 'printf "\n"; exit 0' 1 2 3 15
+
+# Break out with CTRL/C.
+while true
+do
+
+	# Get source and destination sized.
+	SSIZE="`ls -l $SOURCE | awk ' { print $5 } '`"
+	if [ "$LASTSIZE" = "" ]
+	then
+
+		# First run, there was no last size.
+		LASTSIZE=0
+	else
+		LASTSIZE=$DSIZE
+	fi
+	DSIZE="`ls -l $DEST | awk ' { print $5 } '`"
+	if [ $SSIZE = $DSIZE ]
+	then
+		if [ $LASTSIZE != 0 ]
+		then
+			printf "\n"
+		fi
+		break
+	fi
+
+	# Percentage.
+	PERC="`bc -l -e \"scale = 2; ($DSIZE / $SSIZE) * 100\" -e quit`"
+	P="`echo $PERC | sed 's/\..*$//'`"
+
+	# Copy speed.
+	SPEED="`bc -l -e \"scale = 2; (($DSIZE - $LASTSIZE) / $DELAY) / 1024 / 1024\" -e quit`"
+	if [ $LASTSIZE = 0 ]
+	then
+		printf "%3s %12s " "$P" "0"
+	else
+		printf "%3s %12s " "$P" "$SPEED"
+	fi
+
+	# Print progress indicator.
+	BAR=""
+	BAR="${BAR}["
+	N="`bc -l -e \"scale = 2; (($DSIZE / $SSIZE) * $LINELEN)\" -e quit | sed 's/\..*$//'`"
+	LAST="`expr $N - 1`"
+	I=0
+	while [ $I -lt $N ]
+	do
+		if [ $I -eq $LAST ]
+		then
+
+			# Last one.
+			BAR="${BAR}>"
+		else
+			BAR="${BAR}="
+		fi
+		I="`expr $I + 1`"
+	done
+
+	# The rest is spaces.
+	N="`expr $LINELEN - $N`"
+	I=0
+	while [ $I -lt $N ]
+	do
+		BAR="${BAR} "
+		I="`expr $I + 1`"
+	done
+	BAR="${BAR}]"
+	printf "${BAR}\r"
+	sleep $DELAY
+done
+
+# Finish.
+exit $SUCCESS
+

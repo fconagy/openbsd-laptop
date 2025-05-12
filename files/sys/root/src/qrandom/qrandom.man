@@ -1,0 +1,112 @@
+.TH QRANDOM "8" "2022-05-16" "Quantis USB RNG" "System Commands"
+
+.SH NAME
+qrandom \- Quantis hardware random number generator utility
+
+.SH SYNOPSYS
+.B qrandom
+.B [ \-b \fInbytes\fP ]
+.B [ \-n \fIn\fP ]
+.B [ \-o \fIfile\fP ]
+.B [ \-s ]
+.B [ \-U ]
+.B [ \-p ]
+.B [ \-m ]
+.B [ \-u ]
+.B [ \-i \fIlower,upper\fP ]
+.B [ \-d ]
+.B [ \-c \fItype\fP ]
+.B [ \-l ]
+.B [ \-h ]
+
+.SH DESCRIPTION
+This program reads random bytes from a Quantis USB device.
+
+.TP
+.B \-b \fInbytes\fR
+specify buffer size for random bytes.
+
+.TP
+.B \-n \fIn\fR
+how many buffers of random bytes to obtain or
+the number of repetitions. The default is one.
+
+.TP
+.B \-o \fIfile\fR
+is the name of the output file to use.
+Use minus for standard output.
+Works only with bytes.
+
+.TP
+.B \-s
+put space delimiter between printed bytes.
+
+.TP
+.B \-U
+print bytes to in uppercase hex format.
+
+.TP
+.B \-p
+print bytes to standard output in hex format.
+
+.TP
+.B \-m
+mix bytes to the entropy pool via trng.
+This is actually disabled for the time being.
+
+.TP
+.B \-u
+unbuffered indirect reads, read one packet for every item.
+Then picks one randomly from the packet.
+
+.TP
+.B \-i \fIlower,upper\fR
+print integer numbers between lower and upper range including range.
+
+.TP
+.B \-d
+print double floating numbers between 0 and 1.
+
+.TP
+.B \-c \fItype\fR
+print random character strings of length \fInbytes\fR.
+The
+.B \fItype\fR
+can be:
+
+.IP
+\fB1\fR for printable ASCII characters.
+.IP
+\fB2\fR for ASCII letters (7-bit).
+.IP
+\fB3\fR for numbers.
+.IP
+\fB4\fR to print syllables. These are easier to pronounce
+and type but contain less entropy for the same length.
+.IP
+\fB5\fR print hex bytes.
+.IP
+\fB6\fR print uppercase hex bytes.
+.IP
+\fB7\fR just binary bytes as they are.
+.br
+The default type is 5.
+
+.TP
+.B \-l
+list information about the connected device.
+Only for root.
+
+.TP
+.B \-h
+print this help.
+
+.TP
+.br
+Note that the order of options on the command line is significant.
+Some of the options are interpreted as actions, executed in the order
+specified. So for example buffer size and number of buffer should be
+specified before using -p to print.
+
+.RE
+

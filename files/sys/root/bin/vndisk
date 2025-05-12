@@ -1,0 +1,836 @@
+#!/bin/sh
+
+# Manages encrypted small disks under OpenBSD.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Disable delete.
+#DISABLE_DELETE=no
+DISABLE_DELETE=yes
+
+# Disable rename.
+#DISABLE_RENAME=no
+DISABLE_RENAME=yes
+
+# Device number.
+N=0
+
+# Print help.
+case "${1}" in
+--help|-help|help|-h)
+	/bin/cat <<!EOF
+This script manages encrypted small disks.
+Usage:
+    vndisk [-n n][help|create name size|mount name|unmount name|
+        write name|list|delete name|unmountall]
+where
+    -n n                n is the device number to use, 0-3.
+                        The default is 0.
+    help                prints this help.
+    list                list the disks.
+    create name size    create an encrypted disk with the
+                        given name and the specfified size
+                        (in megabytes). Maximum is 999 MB.
+    write name          mount the named disk as read-write.
+    mount name          mount the named disk. Will be mounted as
+                        read-only. This is the preferred use.
+    unmount name        unmount the named disk.
+    unmountall          unmount all mounted disks.
+    delete name         deletes the specified disk. Disk will be
+                        erased. Disabled for the time being.
+It uses the utility vnconfig which does Blowfish. Works only on OpenBSD.
+The disks are mounted under /vol/name.
+!EOF
+	exit $FAILURE
+	;;
+-n|--number)
+
+	# Device number specified.
+	shift
+	case "${1}" in
+	[0-3])
+
+		# There are only four devices.
+		N="${1}"
+		shift
+		;;
+	*)
+		echo "Wrong argument to -n"
+		exit $FAILURE
+		;;
+	esac
+	;;
+-*)
+
+	# Report error.
+	echo "Wrong switch"
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+if [ "`/usr/bin/id -u`" != 0 ]
+then
+	echo "You have to be root to run this script"
+	exit $FAILURE
+fi
+case "`/usr/bin/uname`" in
+OpenBSD)
+	;;
+*)
+	echo "This script works only on OpenBSD"
+	exit $FAILURE
+	;;
+esac
+if [ "${DOAS_USER}" = "" ]
+then
+	echo "This script is designed to run under doas"
+	exit $FAILURE
+fi
+
+# Traps.
+#trap "echo Operation canceled; exit 1" 1 2 3 15
+trap "" 1 2 3 15
+
+# Disk directory.
+DISKDIR=/root/vndisk
+if [ ! -d $DISKDIR ]
+then
+	/bin/mkdir -p $DISKDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot create $DISKDIR"
+		exit $FAILURE
+	fi
+	/bin/chmod og-rwx $DISKDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot chmod $DISKDIR"
+		exit $FAILURE
+	fi
+fi
+
+# Mount directory.
+MNTDIR=/vol
+if [ ! -d $MNTDIR ]
+then
+	/bin/mkdir -p $MNTDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot create $MNTDIR"
+		exit $FAILURE
+	fi
+fi
+
+# Disk device.
+# N might come from the command line.
+# Otherwise the default is 0.
+DEV=/dev/vnd${N}c
+if [ ! -b $DEV ]
+then
+	echo "Not a block device"
+	exit $FAILURE
+fi
+RDEV=/dev/rvnd${N}c
+if [ ! -c $RDEV ]
+then
+	echo "Not a raw device"
+	exit $FAILURE
+fi
+
+# Log file.
+LOGFILE=$DISKDIR/vndisk.log
+STAMP="`date +%Y-%m-%dT%H:%M:%S`"
+
+# Log message.
+log() {
+	echo "${STAMP} ${1}" >>$LOGFILE
+}
+
+# Command.
+CMD="${1}"
+case "${CMD}" in
+-*)
+	echo "Wrong command"
+	exit $FAILURE
+	;;
+*[!-_a-zA-Z0-9]*)
+	echo "Invalid characters in command"
+	exit $FAILURE
+	;;
+"")
+	echo "Specify command"
+	exit $FAILURE
+	;;
+esac
+LEN="`/bin/echo \"${CMD}\" | /usr/bin/awk ' { print length($0) } '`"
+if [ $LEN -gt 32 ]
+then
+	echo "Command too long"
+	exit $FAILURE
+fi
+shift
+
+# Mount options. Default is read-only.
+MNTOPT="-o rdonly,nosuid,nodev,noexec,sync"
+case "${CMD}" in
+mount)
+	MNTOPT="-o rdonly,nosuid,nodev,noexec,sync"
+	;;
+write)
+	MNTOPT="-o nosuid,nodev,noexec,sync"
+	;;
+esac
+
+# Command.
+case "${CMD}" in
+create)
+
+	# Get disk name and size.
+	NAME="${1}"
+	case "${NAME}" in
+	-*)
+		echo "Wrong name - confused"
+		exit $FAILURE
+		;;
+	*[!-_a-zA-Z0-9]*)
+		echo "Invalid characters in name"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify name"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`/bin/echo ${NAME} | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Name too long"
+		exit $FAILURE
+	fi
+	shift
+	SIZE="${1}"
+	case "${SIZE}" in
+	*[!0-9]*)
+		echo "Invalid characters in size"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify size in MB"
+		exit $FAILURE
+		;;
+	[1-9]|[1-9][0-9]|[1-9][0-9][0-9])
+
+		# OK.
+		;;
+	*)
+
+		# Not OK.
+		echo "Wrong size"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`/bin/echo ${SIZE} | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 3 ]
+	then
+		echo "Size too big not more than 3 digits"
+		exit $FAILURE
+	fi
+	shift
+	if [ "$1" != "" ]
+	then
+		echo "Extra parameter"
+		exit $FAILURE
+	fi
+
+	# Disk image file.
+	DISKFILE="${DISKDIR}/${NAME}.vndisk"
+	if [ -r $DISKFILE ]
+	then
+		echo "Image file already exists"
+		exit $FAILURE
+	fi
+
+	# Set owner.
+	DISKOWNER="${DISKDIR}/${NAME}.owner"
+	if [ -r $DISKOWNER ]
+	then
+		echo "Owner flag already exists"
+		exit $FAILURE
+	fi
+	echo $DOAS_USER >$DISKOWNER
+	if [ $? -ne 0 ]
+	then
+		echo "Error with flag file"
+		exit $FAILURE
+	fi
+
+	# Create disk image file.
+	LOG=$DISKDIR/${NAME}.log
+	/bin/dd if=/dev/urandom of=$DISKFILE bs=1048576 count=$SIZE >$LOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot create disk $NAME"
+		/bin/cat $LOG
+		exit $FAILURE
+	fi
+	/bin/chmod og-rwx $DISKFILE
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot chmod disk image file"
+		exit $FAILURE
+	fi
+	echo "Disk image file created"
+
+	# Configure and ask for key.
+	# vnconfig will re-open the terminal for the passphrase
+	# prompt so the redirection is OK.
+	echo "You will have to enter the passphrase (encryption key)."
+	echo "Choose a strong passphrase which is not easy to guess."
+	echo "There will be no second time for confirmation so make"
+	echo "sure you got it right and the key is saved in a safe place."
+	echo "There is no way to recover a lost key."
+	echo "Note that there is no way to change the key later on."
+	echo "For a new key create a new disk with a new key and copy files over."
+	/sbin/vnconfig -k $DEV $DISKFILE >$LOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error configuring encrypted disk"
+		/bin/cat $LOG
+		exit $FAILURE
+	fi
+	echo "Disk configured"
+
+	# Label disk with an empty label.
+	/sbin/disklabel -d $RDEV >$LOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error labeling encrypted disk"
+		/bin/cat $LOG
+		/sbin/vnconfig -u $DEV >$LOG 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Error unconfiguring disk"
+		fi
+		/bin/cat $LOG
+		exit $FAILURE
+	fi
+	echo "Disk labeled"
+
+	# Create file system on it.
+	/sbin/newfs $RDEV >$LOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error creating file system"
+		/sbin/vnconfig -u $DEV
+		if [ $? -ne 0 ]
+		then
+			echo "Error unconfiguring disk"
+		fi
+		/bin/cat $LOG
+		exit $FAILURE
+	fi
+	echo "File system created, log below"
+	cat $LOG
+
+	# Unconfigure.
+	/sbin/vnconfig -u $DEV >/dev/null 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error unconfiguring disk"
+	fi
+	echo "Disk $NAME is ready to mount"
+	echo "Mount it first time as read-write and check the encryption key"
+	log "$NAME created for $DOAS_USER"
+	;;
+mount|write)
+
+	# Get disk name.
+	NAME="${1}"
+	case "${NAME}" in
+	-*)
+		echo "Wrong name"
+		exit $FAILURE
+		;;
+	*[!-_a-zA-Z0-9]*)
+		echo "Invalid characters in name"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify name"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`echo ${NAME} | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Name too long"
+		exit $FAILURE
+	fi
+	shift
+	if [ "$1" != "" ]
+	then
+		echo "Extra parameter"
+		exit $FAILURE
+	fi
+
+	# Mount point.
+	MNT=$MNTDIR/${NAME}
+	MNTFS="`/sbin/mount | /usr/bin/cut -d ' ' -f 3 | /usr/bin/egrep -e \"^${MNT}$\"`"
+	if [ "$MNTFS" != "" ]
+	then
+		echo "Already mounted"
+		exit $FAILURE
+	fi
+	if [ ! -d $MNT ]
+	then
+
+		# Check before mkdir.
+		DISKIMAGE="${DISKDIR}/${NAME}.vndisk"
+		if [ ! -r "${DISKIMAGE}" ]
+		then
+			echo "Disk image file does not exist"
+			exit $FAILURE
+		fi
+
+		# Create mount point.
+		/bin/mkdir -p $MNT
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot create mount point"
+			exit $FAILURE
+		fi
+	else
+		echo "Mount point already exist"
+		MNTOWNER="`/usr/bin/stat -f '%Su' $MNT`"
+		if [ "$MNTOWNER" != "root" ]
+		then
+			echo "Wrong owner of mount point - confused"
+			exit $FAILURE
+		fi
+	fi
+
+	# Checks.
+	DISKFILE="${DISKDIR}/${NAME}.vndisk"
+	if [ ! -r "${DISKFILE}" ]
+	then
+		echo "Disk image file does not exist"
+		exit $FAILURE
+	fi
+	DISKOWNER="${DISKDIR}/${NAME}.owner"
+	if [ ! -r "${DISKOWNER}" ]
+	then
+		echo "No owner flag"
+		exit $FAILURE
+	fi
+	OWNER="`/bin/cat $DISKOWNER`"
+	if [ "$OWNER" != "$DOAS_USER" ]
+	then
+		echo "Wrong owner"
+		exit $FAILURE
+	fi
+	if /sbin/vnconfig -l | /usr/bin/grep 'covering' | \
+		/usr/bin/grep "${DISKFILE}" >/dev/null 2>&1
+	then
+		echo "Already configured - confused"
+		exit $FAILURE
+	fi
+
+	# Configure and ask for key.
+	echo "Disk $NAME $CMD"
+	/sbin/vnconfig -k $DEV "$DISKFILE" >/dev/null 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot configure encrypted disk"
+		exit $FAILURE
+	fi
+
+	# Check. Depends on internal detail.
+	# Get the top two block and search for vndisk particularity.
+	if /bin/dd if=$DEV bs=512 count=2 2>/dev/null | /usr/bin/grep fictitious >/dev/null 2>&1
+	then
+
+		# Ok.
+		trap "" 1 2 3 15
+		sleep 1
+		trap "echo Operation canceled; exit 1" 1 2 3 15
+		:
+	else
+
+		# Wrong passphrase.
+		trap "" 1 2 3 15
+		sleep 7
+		echo "I am afraid this is a wrong passphrase"
+		trap "echo Operation canceled; exit 1" 1 2 3 15
+		/sbin/vnconfig -u $DEV
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot unconfigure device"
+		fi
+		exit $FAILURE
+	fi
+
+	# Mount.
+	/sbin/mount $MNTOPT $DEV $MNT
+	if [ $? -ne 0 ]
+	then
+
+		# Mount failed.
+		echo "Cannot mount disk"
+		/sbin/vnconfig -u $DEV
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot unconfigure device"
+		fi
+		exit $FAILURE
+	fi
+	if [ "${CMD}" = "write" ]
+	then
+
+		# Set protections for the top.
+		/bin/chmod og-rwx $MNT
+		if [ $? -ne 0 ]
+		then
+			echo "chmod failed"
+			exit $FAILURE
+		fi
+		/bin/chmod g+s $MNT
+		if [ $? -ne 0 ]
+		then
+			echo "chmod failed"
+			exit $FAILURE
+		fi
+		/sbin/chown $OWNER $MNT
+		if [ $? -ne 0 ]
+		then
+			echo "chown failed"
+			exit $FAILURE
+		fi
+	fi
+	echo "Mounted $MNT"
+	log "$NAME mounted for $DOAS_USER"
+	;;
+
+unmount|umount)
+
+	# Get disk name.
+	NAME="${1}"
+	case "${NAME}" in
+	-*)
+		echo "Wrong name"
+		exit $FAILURE
+		;;
+	*[!-_a-zA-Z0-9]*)
+		echo "Invalid characters in name"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify name"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`echo ${NAME} | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Name too long"
+		exit $FAILURE
+	fi
+	shift
+	if [ "$1" != "" ]
+	then
+		echo "Extra parameter"
+		exit $FAILURE
+	fi
+
+	# Checks.
+	DISKOWNER="${DISKDIR}/${NAME}.owner"
+	if [ ! -r $DISKOWNER ]
+	then
+		echo "No owner flag"
+		exit $FAILURE
+	fi
+	if [ "`/bin/cat $DISKOWNER`" != "$DOAS_USER" ]
+	then
+		echo "Wrong owner"
+		exit $FAILURE
+	fi
+
+	# Mount point.
+	MNT=$MNTDIR/${NAME}
+	MNTFS="`/sbin/mount | /usr/bin/cut -d ' ' -f 3 | /usr/bin/egrep -e \"^${MNT}$\"`"
+	if [ "$MNTFS" = "" ]
+	then
+		echo "Disk not mounted now"
+		exit $FAILURE
+	fi
+	if [ ! -d $MNT ]
+	then
+		echo "Mount point does not exist"
+		exit $FAILURE
+	fi
+	MNTOWNER="`/usr/bin/stat -f '%Su' $MNT`"
+	if [ "$MNTOWNER" != "$DOAS_USER" ]
+	then
+		echo "Wrong owner of mount point"
+		exit $FAILURE
+	fi
+
+	# Unmount.
+	/sbin/umount $MNT
+	if [ $? -ne 0 ]
+	then
+		echo "Unmount failed"
+		exit $FAILURE
+	fi
+
+	# Unconfigure device.
+	DISKFILE="${DISKDIR}/${NAME}.vndisk"
+	if [ ! -r $DISKFILE ]
+	then
+		echo "Disk image file does not exist - confused"
+		exit $FAILURE
+	fi
+	if /sbin/vnconfig -l | /usr/bin/grep 'covering' | \
+		/usr/bin/grep "${DISKFILE}" >/dev/null 2>&1
+	then
+
+		# Our disk, unconfigure.
+		VNDEV="`/sbin/vnconfig -l | /usr/bin/grep 'covering' | \
+			/usr/bin/grep \"${DISKFILE}\" | /usr/bin/awk -F ':' ' { print $1 } '`"
+		if [ "${VNDEV}" = "" ]
+		then
+			echo "Cannot find matching VN device"
+			exit $FAILURE
+		fi
+		/sbin/vnconfig -u ${VNDEV}
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot unconfigure device"
+			exit $FAILURE
+		fi
+	else
+		echo "Disk not configured now - confused"
+		exit $FAILURE
+	fi
+	/bin/rmdir $MNT
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot remove mount point"
+	fi
+	echo "Unmounted $MNT"
+	log "$NAME unmounted for $DOAS_USER"
+	;;
+unmountall|umountall)
+
+	# Unmount all mounted vn disks for the user.
+	cd $DISKDIR
+	/bin/ls | /usr/bin/grep '\.owner$' | /usr/bin/sed 's/\.owner$//' | \
+		while read NAME REST
+	do
+		if [ "`/bin/cat ${NAME}.owner`" = "$DOAS_USER" ]
+		then
+			MNT=$MNTDIR/${NAME}
+			MNTFS="`/sbin/mount | /usr/bin/cut -d ' ' -f 3 | /usr/bin/egrep -e \"^${MNT}$\"`"
+			if [ "$MNTFS" != "" ]
+			then
+				$0 unmount $NAME
+			fi
+		fi
+	done
+	;;
+list)
+
+	# List disks.
+	if [ "$1" != "" ]
+	then
+		echo "Extra parameter"
+		exit $FAILURE
+	fi
+	cd $DISKDIR
+	/bin/ls | /usr/bin/grep '\.owner$' | /usr/bin/sed 's/\.owner$//' | \
+		while read NAME REST
+	do
+		if [ "`/bin/cat ${NAME}.owner`" = "$DOAS_USER" ]
+		then
+			if [ "${NAME}" != "" ]
+			then
+				if /sbin/mount | /usr/bin/grep " on /vol/${NAME} " >/dev/null 2>&1
+				then
+					echo "${NAME} mounted"
+				else
+					echo "${NAME}"
+				fi
+			fi
+		fi
+	done
+	log "$DOAS_USER list"
+	;;
+
+delete)
+
+	# Disabled.
+	if [ $DISABLE_DELETE = yes ]
+	then
+		echo "This function is disabled for the time being"
+		exit $FAILURE
+	fi
+
+	# Get disk name.
+	NAME="${1}"
+	case "${NAME}" in
+	-*)
+		echo "Wrong name"
+		exit $FAILURE
+		;;
+	*[!-_a-zA-Z0-9]*)
+		echo "Invalid characters in name"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify name"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`echo ${NAME} | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Name too long"
+		exit $FAILURE
+	fi
+	shift
+	if [ "$1" != "" ]
+	then
+		echo "Extra parameter"
+		exit $FAILURE
+	fi
+
+	# Checks.
+	DISKOWNER="${DISKDIR}/${NAME}.owner"
+	if [ ! -r $DISKOWNER ]
+	then
+		echo "No owner flag"
+		exit $FAILURE
+	fi
+	if [ "`/bin/cat $DISKOWNER`" != "$DOAS_USER" ]
+	then
+		echo "Wrong owner"
+		exit $FAILURE
+	fi
+	DISKFILE="${DISKDIR}/${NAME}.vndisk"
+	if [ ! -r $DISKFILE ]
+	then
+		echo "Disk image file does not exist"
+		exit $FAILURE
+	fi
+	MNT=$MNTDIR/${NAME}
+	MNTFS="`/sbin/mount | /usr/bin/cut -d ' ' -f 3 | /usr/bin/egrep -e \"^${MNT}$\"`"
+	if [ "$MNTFS" != "" ]
+	then
+		echo "Disk mounted, unmount first"
+		exit $FAILURE
+	fi
+	if /sbin/vnconfig -l | /usr/bin/grep 'covering' | \
+		grep $DISKFILE >/dev/null 2>&1
+	then
+		echo "Disk configured now, has to be unconfigured/unmounted"
+		exit $FAILURE
+	fi
+
+	# Confirm.
+	trap "echo Operation canceled; exit 1" 1 2 3 15
+	echo "Disk $NAME will be deleted"
+	echo "You have seven seconds to press CTRL/C to abort"
+	sleep 7
+	trap "" 1 2 3 15
+
+	# Delete.
+	echo "Erasing disk image file"
+	LOG=$DISKDIR/${NAME}.log
+	/bin/rm -f -P $DISKFILE
+	if [ $? -ne 0 ]
+	then
+		echo "Error removing disk file"
+		exit $FAILURE
+	fi
+	echo "Removing log file"
+	/bin/rm -f -P $LOG
+	if [ $? -ne 0 ]
+	then
+		echo "Error removing log file"
+		exit $FAILURE
+	fi
+	echo "Removing flag file"
+	/bin/rm -f -P $DISKOWNER
+	if [ $? -ne 0 ]
+	then
+		echo "Error removing flag file"
+		exit $FAILURE
+	fi
+	echo "Disk $NAME had been deleted"
+	log "$NAME deleted for $DOAS_USER"
+	;;
+rename)
+
+	# Bail out.
+	if [ $DISABLE_RENAME = yes ]
+	then
+		echo "Disabled"
+		exit $FAILURE
+	fi
+
+	# Rename disks.
+	FROM="$1"
+	TO="$2"
+	if [ "$FROM" = "" -o "$TO" = "" ]
+	then
+		echo "Specify from and to"
+		exit $FAILURE
+	fi
+
+	# Root only.
+	if [ "$DOAS_USER" != "" ]
+	then
+		echo "Running under doas"
+		exit $FAILURE
+	fi
+	if [ `id -u` -ne 0 ]
+	then
+		echo "Not running as root"
+		exit $FAILURE
+	fi
+
+	# Go through the list of files.
+	cd $DISKDIR
+	/bin/ls | egrep -v -e '^vndisk.log$' | \
+		awk -F'.' ' { print $1, $2 } ' | \
+		while read NAME TYPE REST
+	do
+		if [ "$NAME" = "$FROM" ]
+		then
+			F="${NAME}.${TYPE}"
+			T="${TO}.${TYPE}"
+			mv $F $T
+			if [ $? -ne 0 ]
+			then
+				echo "Failed mv $F $T"
+				exit $FAILURE
+			else
+				echo "$F -> $T"
+			fi
+		fi
+	done
+	log "Root rename $FROM $TO"
+	;;
+
+*)
+	echo "Invalid command"
+	log "Invalid command for $DOAS_USER"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

@@ -1,0 +1,475 @@
+#!/bin/sh
+
+# Sync files to/from external drive.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script copies/syncs file to or from an external drive.
+Usage:
+    disksync [-f][-v] to|from drive extra
+where
+    -f          no confirmation.
+    -v          verbose.
+    -e          echo commands, dry run, don't execute.
+    to|from     direction of copy/sync.
+    drive       is the device name of the disk drive like da0.
+    extra       extra switches passed down to script dirsync.
+There should be a config file as ../etc/disksync.conf
+which describes the file systems on various machines.
+Will call script dirsync to do the job, which will use rsync.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Config file.
+CNFDIR="`dirname $0`/../etc"
+if [ ! -d $CNFDIR ]
+then
+	echo "Cannot find $CNFDIR"
+	exit $FAILURE
+fi
+CNF="$CNFDIR/`basename $0`.conf"
+if [ ! -r $CNF ]
+then
+	echo "Cannot find config file $CNF"
+	exit $FAILURE
+fi
+
+# Switches.
+SURE=no
+VERBOSE=no
+DRYRUN=no
+while true
+do
+	case $1 in
+	-f|--force|-force)
+		shift
+		SURE=yes
+		;;
+	-v|--verbose|-verbose)
+		shift
+		VERBOSE=yes
+		;;
+	-e|--echocommand|-echocommand)
+		shift
+		DRYRUN=yes
+		;;
+	-*|--*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+# Command.
+CMD="$1"
+case $1 in
+"")
+	echo "You have to specify to or from"
+	exit $FAILURE
+	;;
+to)
+	shift
+	;;
+from)
+	shift
+	;;
+*)
+	echo "Unknown direction $CMD"
+	exit $FAILURE
+	;;
+esac
+
+# External drive.
+DRV="$1"
+if [ "$DRV" = "" ]
+then
+	DRV=da0
+else
+	shift
+fi
+case $DRV in
+/*)
+
+	# Absolute path name get the device name.
+	DEV=$DRV
+	DRV="`basename $DEV`"
+	;;
+*)
+	# Try to prepend /dev. We got DRV as device name.
+	DEV=/dev/${DRV}
+	;;
+esac
+if [ ! -w $DEV ]
+then
+	echo "Cannot access $DEV"
+	exit $FAILURE
+fi
+
+# Extra switches passed down to rsync.
+EXTRA="$1"
+if [ "$EXTRA" != "" ]
+then
+	shift
+fi
+
+# Our name.
+HST="`hostname | awk -F'.' ' { print $1 } '`"
+if [ "$HST" = "" ]
+then
+	echo "Host name is not defined - confused"
+	exit $FAILURE
+fi
+
+# Mount point.
+MNT="`df | egrep -e "$DEV" | awk ' { print $6 } '`"
+if [ "$MNT" = "" ]
+then
+	echo "Device $DEV is not mounted - please mount it"
+	exit $FAILURE
+fi
+
+# Confirm.
+if [ $SURE != yes ]
+then
+	echo "==== Will use $DRV as detected below"
+	dmesg | tail | grep $DRV
+	df | egrep -e "Filesystem|$DRV"
+	case $CMD in
+	to)
+		MARKER="===>"
+		;;
+	from)
+		MARKER="<==="
+		;;
+	*)
+		MARKER=""
+		;;
+	esac
+	ls $MNT
+	echo "Copying $CMD $MARKER $DEV as $MNT on $HST"
+	echo "Sure: $SURE"
+	echo "Verbose: $VERBOSE"
+	echo "Echocommand: $DRYRUN"
+	if [ "$EXTRA" != "" ]
+	then
+		echo "Applying extra switches $EXTRA to dirsync"
+	fi
+	echo -n "Are you happy with that? [n]: "
+	read ANS
+	case $ANS in
+	[yY]|[yY][eE][sS])
+		;;
+	*)
+		echo "Execution cancelled"
+		exit $FAILURE
+		;;
+	esac
+fi
+
+# Flag file.
+FLAGDIR=/var/tmp/disksync
+if [ ! -d $FLAGDIR ]
+then
+	mkdir $FLAGDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Create $FLAGDIR failed"
+		exit $FAILURE
+	fi
+fi
+US=$FLAGDIR/us.flag
+FOUND=$FLAGDIR/found.flag
+
+# Exclude file.
+XCLF=exclude.list
+
+if [ $VERBOSE = yes ]
+then
+	echo "==== Started at `date`"
+	echo "==== Copying $CMD $DEV as $MNT on $HST"
+fi
+
+# Check.
+rm -f $US
+rm -f $FOUND
+rm -f $XCLF
+cat $CNF | while read OP LOCAL EXTERNAL SWITCHES REST
+do
+	FIRSTWORD=$OP
+	case $FIRSTWORD in
+	""|\#*)
+
+		# Skip.
+		;;
+	\[*)
+
+		# Lead.
+		LEAD="`echo $FIRSTWORD | sed 's/\[//; s/\]//;'`"
+		if [ "$LEAD" = "$HST" ]
+		then
+
+			# This is us.
+			touch $US
+		else
+
+			# New lead.
+			rm -f $US
+		fi
+		;;
+	*)
+		if [ -r $US ]
+		then
+
+			# This is us.
+			touch $FOUND
+			if [ $? -ne 0 ]
+			then
+				echo "Cannot create $FOUND"
+				exit $FAILURE
+			fi
+			case $CMD in
+			to)
+				FIRST=$LOCAL
+				SECOND=$EXTERNAL
+				;;
+			from)
+				FIRST=$EXTERNAL
+				SECOND=$LOCAL
+				;;
+			*)
+				echo "Unknown direction - confused"
+				exit $FAILURE
+				;;
+			esac
+			case $OP in
+			copy|copydel)
+
+				# Copy.
+				case $FIRST in
+				/*)
+					;;
+				*)
+					echo "$FIRST path not absolute"
+					exit $FAILURE
+					;;
+				esac
+				case $SECOND in
+				/*)
+					;;
+				*)
+					echo "$SECOND path not absolute"
+					exit $FAILURE
+					;;
+				esac
+				if [ ! -d $FIRST ]
+				then
+					echo "Directory $FIRST does not found"
+					exit $FAILURE
+				fi
+				if [ ! -d $SECOND ]
+				then
+					echo "Directory $SECOND does not found"
+					exit $FAILURE
+				fi
+				if [ $VERBOSE = yes ]
+				then
+					echo "====     $FIRST $OP $CMD $SECOND"
+				fi
+				;;
+			excdel)
+
+				# Exclude lines.
+				if [ $VERBOSE = yes ]
+				then
+					echo "====     Exclude $FIRST"
+				fi
+				case $FIRST in
+				/*)
+					;;
+				*)
+					echo "Exclude $FIRST path not absolute"
+					exit $FAILURE
+					;;
+				esac
+				if [ ! -d $FIRST ]
+				then
+					echo "Exclude directory $FIRST does not found"
+					exit $FAILURE
+				fi
+				;;
+			*)
+				echo "Unknown operation $OP"
+				exit $FAILURE
+				;;
+			esac
+		fi
+		;;
+	esac
+done
+
+rm -f $US
+rm -f $FOUND
+rm -f $XCLF
+cat $CNF | while read OP LOCAL EXTERNAL SWITCHES REST
+do
+	SWITCHES="$SWITCHES $REST $EXTRA"
+	FIRSTWORD=$OP
+	case $FIRSTWORD in
+	"")
+
+		# Skip.
+		;;
+	\#*)
+
+		# Comment.
+		;;
+	\[*)
+
+		# Lead.
+		LEAD="`echo $FIRSTWORD | sed 's/\[//; s/\]//;'`"
+		if [ "$LEAD" = "$HST" ]
+		then
+
+			# This is us.
+			touch $US
+		else
+
+			# New lead.
+			rm -f $US
+		fi
+		;;
+	*)
+		if [ -r $US ]
+		then
+
+			# This is us.
+			touch $FOUND
+			if [ $? -ne 0 ]
+			then
+				echo "Cannot create $FOUND"
+				exit $FAILURE
+			fi
+			case $CMD in
+			to)
+				FIRST=$LOCAL
+				SECOND=$EXTERNAL
+				;;
+			from)
+				FIRST=$EXTERNAL
+				SECOND=$LOCAL
+				;;
+			*)
+				echo "Unknown direction - confused"
+				exit $FAILURE
+				;;
+			esac
+			case $OP in
+			excdel)
+
+				# Directories to be excluded from rsync -d (delete).
+				XDIR="$LOCAL"
+				echo "$XDIR" >>$XCLF
+				;;
+			copy)
+
+				# Copy.
+				COMMAND="dirsync $SWITCHES -c $FIRST $SECOND"
+				if [ $VERBOSE = yes ]
+				then
+					echo "==== Copy using $COMMAND"
+				fi
+				if [ $DRYRUN = yes ]
+				then
+					echo $COMMAND
+					STATUS=0
+				else
+					$COMMAND
+					STATUS=$?
+				fi
+				if [ $STATUS -ne 0 ]
+				then
+					echo "$COMMAND failed"
+				fi
+				;;
+			copydel)
+
+				# Copy with delete.
+				if [ -r $XCLF ]
+				then
+					COMMAND="dirsync $SWITCHES -d -x $XCLF -c $FIRST $SECOND"
+					if [ $VERBOSE = yes ]
+					then
+						COMMAND="dirsync $SWITCHES -d -x $XCLF -c $FIRST $SECOND"
+						echo "==== Excluded directories"
+						cat $XCLF | sed 's/^/==== /'
+						echo "==== Copy with delete using $COMMAND"
+					fi
+					if [ $DRYRUN = yes ]
+					then
+						echo $COMMAND
+						STATUS=0
+					else
+						$COMMAND
+						STATUS=$?
+					fi
+					if [ $STATUS -ne 0 ]
+					then
+						echo "$COMMAND failed"
+					fi
+					rm -f $XCLF
+				else
+					COMMAND="dirsync $SWITCHES -d -c $FIRST $SECOND"
+					if [ $VERBOSE = yes ]
+					then
+						echo "==== Copy with delete using $COMMAND"
+					fi
+					if [ $DRYRUN = yes ]
+					then
+						echo $COMMAND
+						STATUS=0
+					else
+						$COMMAND
+						STATUS=$?
+					fi
+					if [ $STATUS -ne 0 ]
+					then
+						echo "$COMMAND failed"
+					fi
+				fi
+				;;
+				*)
+					echo "Unknown operation $OP"
+					exit $FAILURE
+				;;
+			esac
+		fi
+		;;
+	esac
+done
+if [ ! -r $FOUND ]
+then
+	echo "No entry was found for $HST in the config file"
+	exit $FAILURE
+fi
+
+# Finish.
+if [ $VERBOSE = yes ]
+then
+	echo "==== Finished at `date`"
+fi
+rm -f $US
+rm -f $FOUND
+rm -f $XCLF
+exit $SUCCESS
+

@@ -1,0 +1,414 @@
+#!/bin/sh
+
+# Set protections accordingly to a find-like list.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script sets protections and ownership accordingly to a list file.
+The list file is in a specific format produced by find and stat.
+Usage:
+    setprot [-v][-c][-l][-s] [directory] [listfile]
+where
+    -v          verbose output.
+    -c          check saved file attributes vs saved list, report and do nothing.
+    -C          check saved file attributes vs system file, also compare files and
+                then report and do nothing.
+    -l          show system files and saved files in pairs, two lines for a file.
+    -s          modify protection and ownership of the system files.
+                The default is to change ownership and protection of the
+                saved files, accordingly to the list file.
+    -d dir      top level directory relative to the home directory.
+                Can not be an absolute path.
+    directory   is the top level directory which should have a directory structure
+                same as the list file. The default is ~/save/hostname. Should
+                be an absolute pathname when specified.
+    listfile    is a list file which should be the output of a find command
+                with executing the stat command. File names should be absolute, that
+                is the find command directory argument should be a full pathname.
+                Only files should be in the listing, no directories.
+
+An example to create the list is:
+    find . -type f -exec \
+        stat -f '%p %Sp %Su %Sg %Sm %N' -t '%Y-%m-%dT%H:%M:%S' {} \; | \
+awk ' {
+    printf "%d %s %-8s %-8s %s %s\n", $1, $2, $3, $4, $5, $6
+} '
+
+The fields are: protection-octal, protection, owner, group, iso-date, absolute-path
+
+Note:
+
+It is expected that the savesys directory itself might be coming from a git repository
+which does not preserve permissions. The repository should contain a savesys.list file
+with the permissions saved so this script can restore permissions, userid and group
+id from that file.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Debug.
+#E="echo"
+E=""
+
+# Flag file to bail out.
+BAILOUT=setprot.bailout.tmp
+
+# Set up trap.
+trap "echo 'Execution canceled'; rm -f $BAILOUT; exit 1" 1 2 3 15
+
+# Options.
+CHECK=no
+CHECKSYS=no
+LISTFILES=no
+SYSTEM=no
+VERBOSE=no
+DIR=""
+while [ "$1" != "" ]
+do
+	case "$1" in
+	-c|--check|-check)
+		shift
+		CHECK=yes
+		;;
+	-C|--checksys|-checksys)
+		shift
+		CHECKSYS=yes
+		;;
+	-l|--list|-list)
+		shift
+		LISTFILES=yes
+		;;
+	-s|--system|-system)
+		shift
+		SYSTEM=yes
+		;;
+	-v|--verbose|-verbose)
+		shift
+		VERBOSE=yes
+		;;
+	-d|--directory|-directory)
+		shift
+		case $1 in
+		"")
+			echo "Specify directory to -d"
+			exit $FAILURE
+			;;
+		/*)
+			echo "Should not be absolute path $1"
+			exit $FAILURE
+			;;
+		esac
+
+		# Relative to home, like with script savesys.
+		DIR=${HOME}/${1}
+
+		shift
+		if [ "$1" != "" ]
+		then
+			echo "Do not specify directory argument with -d"
+			exit $FAILURE
+		fi
+		;;
+	-*)
+		echo "Wrong switch $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+# List file name.
+LISTFILENAME=savesys.list
+
+# Host name.
+HOST="`hostname | sed 's/\..*$//'`"
+if [ "$HOST" = "" ]
+then
+	echo "Cannot get host name - confused"
+	exit $FAILURE
+fi
+
+# Directory directly specified can be anywhere.
+if [ "$DIR" = "" ]
+then
+
+	# There was no -d. Take argument if any.
+	if [ "$1" != "" ]
+	then
+
+		# There was an argument. Check.
+		DIR="$1"
+		case $DIR in
+		/*)
+
+			# OK.
+			;;
+		*)
+			echo "$DIR should be absolute path"
+			;;
+		esac
+		if [ $VERBOSE = yes ]
+		then
+			echo "Using $DIR from argument"
+		fi
+	else
+
+		# No -d and no argument, use default.
+		DIR=$HOME/save/$HOST
+		if [ $VERBOSE = yes ]
+		then
+			echo "Default directory $DIR used"
+		fi
+	fi
+else
+
+	# There was -d. We should have something.
+	if [ $VERBOSE = yes ]
+	then
+			echo "Using $DIR from -d switch"
+	fi
+fi
+
+# Check.
+if [ ! -e $DIR ]
+then
+	echo "Cannot find $DIR"
+	exit $FAILURE
+fi
+if [ ! -d $DIR ]
+then
+	echo "$DIR not a directory"
+	exit $FAILURE
+fi
+if [ ! -d $DIR/sys ]
+then
+	echo "This does not look like a savesys directory"
+	exit $FAILURE
+fi
+TOP=$DIR/sys
+LISTFILE=$TOP/$LISTFILENAME
+if [ ! -r $LISTFILE ]
+then
+	echo "Does not find $LISTFILE in $DIR - confused"
+	exit $FAILURE
+fi
+
+# List file.
+if [ "$2" = "" ]
+then
+	LIST=$LISTFILE
+else
+
+	# Overwrite list file.
+	LIST="$2"
+	case $LIST in
+	/*)
+		;;
+	*)
+		echo "$LIST should be an absolute pathname"
+		exit $FAILURE
+		;;
+	esac
+	if [ $VERBOSE = yes ]
+	then
+		echo "Using $LIST instead of $LISTFILE in the save directory"
+	fi
+	if [ ! -r $LIST ]
+	then
+		echo "Cannot find $LIST"
+		exit $FAILURE
+	fi
+fi
+
+# Now process. We need to use a flag file to exit from the subshell.
+rm -f $BAILOUT
+cat $LIST | awk ' { print $1, $2, $3, $4, $5, $6 } ' | \
+	while read PROT SYMPROT USER GROUP MTIME FILENAME REST
+do
+
+	# Check.
+	if [ "$REST" != "" ]
+	then
+		echo "Blank in file name at $FILENAME $REST"
+		touch $BAILOUT
+		break
+	fi
+	case $FILENAME in
+	/${LISTFILENAME})
+
+		# The list file itself, that's not in the system.
+		# Ignore. This should be the last one.
+		continue
+		;;
+	/*)
+
+		# Ok.
+		;;
+	*)
+		echo "$FILENAME not absolute - confused"
+		touch $BAILOUT
+		break
+		;;
+	esac
+
+	# File in the system.
+	SYSNAME=$FILENAME
+
+	# File in saved directory tree.
+	SAVENAME=${TOP}${FILENAME}
+
+	# Check.
+	if [ ! -r $SYSNAME ]
+	then
+		echo "$SYSNAME not in system"
+		touch $BAILOUT
+		break
+	fi
+	if [ ! -r $SAVENAME ]
+	then
+		echo "$SAVENAME not saved"
+		touch $BAILOUT
+		break
+	fi
+	if [ $SYSTEM = yes ]
+	then
+
+		# Change system file.
+		NAME=$SYSNAME
+	else
+
+		# Change saved file.
+		NAME=$SAVENAME
+	fi
+
+	# Check.
+	BADPROT=no
+	DIFFER=no
+
+	# As the system file.
+	LSSYS="`ls -l $SYSNAME | sed 's/\/.*$//'`"
+
+	# The file under the save directory.
+	LSSAVE="`ls -l $SAVENAME | sed 's/\/.*$//'`"
+
+	# Stat info of the file saved under the save directory.
+	STATSAVE="`stat -f '%p %Sp %Su %Sg %Sm %N' -t '%Y-%m-%dT%H:%M:%S' $SAVENAME | \
+        awk ' {
+    printf "%d %s %-8s %-8s %s %s\n", $1, $2, $3, $4, $5, $6
+} ' | sed 's/ \.\// \//'`"
+
+	# Stat info from the saved list file.
+	LISTSAVE="`echo $PROT $SYMPROT $USER $GROUP $MTIME $SAVENAME | awk ' {
+    printf "%d %s %-8s %-8s %s %s\n", $1, $2, $3, $4, $5, $6
+} '`"
+
+	if [ $CHECK = yes ]
+	then
+		if [ $VERBOSE = yes ]
+		then
+			echo "Checking against saved file list"
+		fi
+		if [ "$STATSAVE" != "$LISTSAVE" ]
+		then
+
+			# Protection differs.
+			BADPROT=yes
+			echo "$NAME notok"
+		else
+			echo "$NAME ok"
+		fi
+	elif [ $CHECKSYS = yes ]
+	then
+		if [ $VERBOSE = yes ]
+		then
+			echo "Checking against current system files"
+		fi
+		if [ "$LSSAVE" != "$LSSYS" ]
+		then
+
+			# Protection differs.
+			BADPROT=yes
+		fi
+		if diff $NAME $SAVENAME >/dev/null
+		then
+			:
+		else
+
+			# Content differs.
+			DIFFER=yes
+		fi
+		if [ $BADPROT = yes -o $DIFFER = yes ]
+		then
+			echo "$NAME notok"
+		else
+			echo "$NAME ok"
+		fi
+	elif [ $LISTFILES = yes ]
+	then
+
+		# List only.
+		ls -l $SYSNAME $SAVENAME
+	else
+
+		# Set protection and ownership as saved,
+		if [ "$STATSAVE" != "$LISTSAVE" ]
+		then
+
+			# Change required.
+			$E chmod $PROT $NAME
+			if [ $? -ne 0 ]
+			then
+				echo "$NAME chmod failed"
+				touch $BAILOUT
+				break
+			fi
+			$E chown $USER $NAME
+			if [ $? -ne 0 ]
+			then
+				echo "$NAME chown failed"
+				touch $BAILOUT
+				break
+			fi
+			$E chgrp $GROUP $NAME
+			if [ $? -ne 0 ]
+			then
+				echo "$NAME chgrp failed"
+				touch $BAILOUT
+				break
+			fi
+			if [ $VERBOSE = yes ]
+			then
+				echo "$NAME fixed"
+			fi
+		else
+
+			# Looks OK.
+			# A bit too much output.
+			#if [ $VERBOSE = yes ]
+			#then
+			#	echo "$NAME skip"
+			#fi
+			:
+		fi
+	fi
+done
+if [ -e $BAILOUT ]
+then
+
+	# Bailout signalled.
+	exit $FAILURE
+fi
+
+# Finish.
+rm -f $BAILOUT
+exit $SUCCESS
+

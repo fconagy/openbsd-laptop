@@ -1,0 +1,298 @@
+#!/bin/sh
+
+# Disconnect.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help|help)
+	/bin/cat <<!EOF
+This script will bring down all interfaces except
+the local loopback.
+Usage:
+    disconnect [-v][-d][-a]
+where
+    -v      verbose.
+    -d      debug.
+    -a      remove all addresses and also the
+            default gateway.
+            Kills wpa_supplicant and dhclient/dhcpleased as well.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+if [ `id -u` != 0 ]
+then
+	echo "You have to be root to run this script"
+	exit $FAILURE
+fi
+
+# Options.
+VERBOSE=no
+DEBUG=no
+ALL=no
+ARGC=0
+while [ "${1}" != "" ]
+do
+
+	# Check.
+	case "${1}" in
+	*[!-_a-zA-Z0-9]*)
+		echo "Alien characters in argument"
+		exit $FAILURE
+		;;
+	esac
+	LEN="`/bin/echo \"${1}\" | /usr/bin/awk ' { print length($0) } '`"
+	if [ $LEN -gt 32 ]
+	then
+		echo "Network name too long"
+		exit $FAILURE
+	fi
+	if [ $ARGC -gt 8 ]
+	then
+		echo "Too many arguments"
+		exit $FAILURE
+	fi
+	ARGC="`/bin/expr $ARGC + 1`"
+
+	# Switch.
+	case "${1}" in
+	-v|--verbose|-verbose)
+		shift
+		VERBOSE=yes
+		;;
+	-d|--debug|-debug)
+		shift
+		VERBOSE=yes
+		DEBUG=yes
+		;;
+	-a|--all|-all)
+		shift
+		ALL=yes
+		;;
+	-*)
+		echo "Unknown switch ${1}"
+		exit $FAILURE
+		;;
+
+	*)
+
+		# Argument. Ignore.
+		shift
+		echo "Argument ignored - quitting"
+		exit $FAILURE
+		;;
+	esac
+done
+
+# Config directory.
+CONFDIR="`dirname $0`/../etc"
+if [ ! -d $CONFDIR ]
+then
+	echo "Cannot find config directory $CONFDIR"
+	exit $FAILURE
+fi
+
+# WPA supplicant PID.
+WPID=$CONFDIR/wpas.pid
+
+# Script file.
+SCRIPTFILE=$CONFDIR/connect.script
+
+# Name file.
+NAMEFILE=$CONFDIR/connect.name
+
+# Interface file.
+INTERFILE=$CONFDIR/connect.interface
+
+# DHCP type.
+#DHCP=dhclient
+DHCP=dhcpleased
+
+# When -a was specified.
+if [ $ALL = yes ]
+then
+
+	# Remove default gateway if required.
+	# Needs to be done before the interface goes down
+	# since then the gw also disappears.
+	/usr/bin/netstat -rn | /usr/bin/grep default | /usr/bin/awk ' { print $2 } ' | \
+		while read GW
+	do
+
+		# This should work with more than one default gw.
+		/sbin/route delete default $GW >/dev/null 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot delete default gateway $GW"
+			exit $FAILURE
+		else
+			if [ $VERBOSE = yes ]
+			then
+				echo "$GW gateway removed"
+			fi
+		fi
+	done
+fi
+
+# Down all interfaces. (Except the local loopback and the like.)
+/usr/bin/netstat -in | /usr/bin/egrep -v -e '\*|^lo0|^enc0|^pflog0|Name' | \
+	/usr/bin/awk ' { print $1 } ' | /usr/bin/sort -u | while read I REST
+do
+	if /sbin/ifconfig $I | /usr/bin/grep 'flags=' | /usr/bin/egrep -e '<UP,' >/dev/null
+	then
+
+		# Remove all addresses on the interface if -a.
+		if [ $ALL = yes ]
+		then
+
+			# Release lease, ignore error.
+			if [ $DHCP = dhclient ]
+			then
+				/sbin/dhclient -r $I >/dev/null 2>&1
+			fi
+
+			/sbin/ifconfig $I | /usr/bin/grep 'inet ' | /usr/bin/awk ' { print $2, $4 } ' | \
+			while read ADDR MASK REST
+			do
+				/sbin/ifconfig $I delete $ADDR
+				if [ $? -ne 0 ]
+				then
+					echo "Cannot delete address $ADDR from $I"
+					exit $FAILURE
+				else
+					if [ $VERBOSE = yes ]
+					then
+						echo "$ADDR removed from $I"
+					fi
+				fi
+			done
+
+			# Remove nwid if configured.
+			/sbin/ifconfig $I | /usr/bin/grep 'ieee80211' | \
+			while read IGN1 IGN2 IFNWID
+			do
+				case "${IFNWID}" in
+				\"\")
+					;;
+				*)
+					if [ $VERBOSE = yes ]
+					then
+						echo "Removing nwid"
+					fi
+					/sbin/ifconfig $I -nwid
+					if [ $? -ne 0 ]
+					then
+						echo "Error removing nwid from $I"
+						exit $FAILURE
+					fi
+					if [ $DHCP = dhcpleased ]
+					then
+						if [ $VERBOSE = yes ]
+						then
+							echo "Removing autoconf"
+						fi
+						/sbin/ifconfig $I -autoconf
+						if [ $? -ne 0 ]
+						then
+							echo "Error removing autoconf flag from $I"
+							exit $FAILURE
+						fi
+					fi
+
+					# Magic to put down the wifi interface properly.
+					# After this ifconfig down will work.
+					/sbin/ifconfig $I scan >/dev/null 2>&1
+					sleep 1
+					;;
+				esac
+			done
+		fi
+
+		# Down with it.
+		/sbin/ifconfig $I down >/dev/null 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot put $I down"
+			exit $FAILURE
+		else
+			if [ $VERBOSE = yes ]
+			then
+				echo "$I down"
+			fi
+		fi
+	fi
+done
+
+# Unconfigure when -a.
+# All interfaces should be down at this point.
+if [ $ALL = yes ]
+then
+
+	# Kill DHCP.
+	if /usr/bin/pgrep -x $DHCP >/dev/null 2>&1
+	then
+		if [ $VERBOSE = yes ]
+		then
+			echo "Killing $DHCP"
+		fi
+		/usr/bin/pkill -x $DHCP >/dev/null 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Error killing $DHCP"
+			exit $FAILURE
+		fi
+	fi
+
+	# Kill wpas if running.
+	if /usr/bin/pgrep -x wpa_supplicant >/dev/null 2>&1
+	then
+		if [ $VERBOSE = yes ]
+		then
+			echo "Killing wpa_supplicant"
+		fi
+		/usr/bin/pkill -x wpa_supplicant >/dev/null 2>&1
+		if [ $? -ne 0 ]
+		then
+			echo "Error killing wpa_supplicant"
+			exit $FAILURE
+		fi
+	fi
+	/bin/rm -f $WPID
+
+	# Just to be sure, DHCP sometimes did put back the old resolver.
+	if [ -r /etc/resolv.conf ]
+	then
+		if [ -r /etc/resolv.conf ]
+		then
+			/bin/rm /etc/resolv.conf
+			if [ $? -ne 0 ]
+			then
+				echo "Error removing resolv.conf"
+				exit $FAILURE
+			fi
+			if [ $VERBOSE = yes ]
+			then
+				echo "resolv.conf removed"
+			fi
+		fi
+	fi
+
+	# Remove script file from last connect.
+	/bin/rm -f $SCRIPTFILE
+
+	# Remove name of the last connection.
+	/bin/rm -f $NAMEFILE
+
+	# Remove last connected interface file.
+	/bin/rm -f $INTERFILE
+fi
+
+# Finish.
+exit $SUCCESS
+

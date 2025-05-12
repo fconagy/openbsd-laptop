@@ -1,0 +1,114 @@
+.TH QUSB "8" "2022-05-16" "Quantis USB RNG tester" "System Commands"
+
+.SH NAME
+qusb \- Quantis USB hardware random number generator utility
+
+.SH SYNOPSYS
+.B qusb
+.B [ \-h ]
+.B [ \-v ]
+.B [ \-u ]
+.B [ \-d \fIlevel\fP ]
+.B [ \-b \fIsize\fP ]
+.B [ \-l \fIlength\fP ]
+.B [ \-n \fIn\fP ]
+.B \fBcmd...\fR
+
+.SH DESCRIPTION
+This program is a test program for the Quantis USB device.
+It is a hardware true random number generator made by id Quantique.
+The program tests various library functions. 
+
+.TP
+.B \-h
+Print this help.
+
+.TP
+.B \-v
+Prints the version of the library.
+
+.TP
+.B \-u
+Will use unbuffered indirect reads when possible.
+This involves reading one packet for every item.
+
+.TP
+.B \-d \fIlevel\fR
+Debug level, 0 if not specified.
+
+.TP
+.B \-b \fInbytes\fR
+Specify the buffer size in bytes for the random data.
+
+.TP
+.B \-l \fIlength\fR
+Specify the line length in characters for printing.
+
+.TP
+.B \-n \fIn\fR
+Repeat the operation \fIn\fR times.
+The default is one.
+
+.TP
+.B \fIcmd...\fR
+The command to execute. It is one of the followings.
+
+.TP
+.B enumerate
+Open device and close.
+
+.TP
+.B open
+Open the device. The next word will specify the operation
+to execute.
+
+.TP
+.B readbulk
+Read one bulk packet.
+
+.TP
+.B read
+Read buffer with the given length.
+
+.TP
+.B byte
+Read byte.
+
+.TP
+.B word
+Read word.
+
+.TP
+.B int
+Read int.
+
+.TP
+.B scaledint \fImin\fR \fImax\fR
+Read scaled int between \fImin\fR and \fImax\fR.
+
+.TP
+.B scaleddouble \fImin\fR \fImax\fR
+Read scaled double floating.
+
+.TP
+.B signal
+Test signal handling function.
+
+.TP
+.B print
+Print buffer in hex.
+
+.TP
+.B report
+Report device status.
+
+.TP
+.B probe
+Report if device is present.
+
+.TP
+.B close
+Close the device.
+
+.RE
+

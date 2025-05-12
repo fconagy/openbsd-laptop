@@ -1,0 +1,64 @@
+#!/bin/sh
+
+# Create a list of signatures/hashes for selected files in file systems.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# List of directories.
+DIRPATH="`echo $PATH | sed 's/:/ /g'`"
+DIRUSR="`ls /usr | egrep -v -e 'obj|ports|src|xenocara|xobj|user[0-9][0-9]' | \
+	sed 's/^/\/usr\//' | tr '\n' ' '`"
+DIRLIST="/ $DIRPATH $DIRUSR"
+
+# File with signatures.
+SIGNS=files.signs
+
+# Report of the check.
+REPORT=files.report
+
+# Files on the move.
+ONMOVE="${SIGNS}|${REPORT}|.history|.sh_history"
+
+CMD="$1"
+case $CMD in
+""|-c|--create|-create|create)
+
+	# Sign.
+	echo "$DIRLIST"
+	rm -rf $SIGNS
+	for D in $DIRLIST
+	do
+		printf "%s " "$D"
+		find $D -xdev -type f -print0 | xargs -0 sha256 >>$SIGNS
+		if [ $? -ne 0 ]
+		then
+			echo "Error creating signatures in $D - $SIGNS incomplete"
+			exit $FAILURE
+		fi
+	done
+	printf "\n"
+	;;
+-C|--check|-check|check)
+
+	# Check.
+	if [ ! -e $SIGNS ]
+	then
+		echo "There is no $SIGNS"
+		exit $FAILURE
+	fi
+	cat $SIGNS | sha256 -c | egrep -v -e " OK$" | egrep -v -e "$ONMOVE" >$REPORT
+	cat $REPORT
+	;;
+*)
+
+	# Report error.
+	echo "Unknown action $CMD"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $FAILURE
+

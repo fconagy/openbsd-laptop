@@ -1,0 +1,448 @@
+#!/bin/sh
+
+# Make image backups.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|-help|--help)
+	cat <<!EOF
+This script makes image backups.
+Usage:
+    mkbackup [-v] [savedir] [name] [disk] [partitions]
+where
+    -h                  prints this help.
+    -v                  for verbose messages.
+    -i                  for image backups.
+    -t                  for tar backups.
+    savedir             is the directory to use for the backups.
+                        The default is the current directory.
+    name                is a name to use for the backups, the default
+                        is 'backup'.
+    disk                is the name of the disk, like sda or hda, without
+                        the /dev. The default is sda.
+    partitions          are the partitions like sda1 or hda1, without the
+                        /dev. The default is all non-mounted non-swap Linux
+                        partitions on the disk.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Time stamp.
+STAMP="`date +%Y-%m-%d-%H%M`"
+
+# Save partition table as a printout in a disk file and as a block copy.
+# Arguments: devicename name
+# devicename is the device file name in the /dev directory like sda or hda.
+# name is the name used for the backup.
+
+savepart() {
+	if [ "$1" = "" -o "$2" = "" ]
+	then
+		echo "Specify device name and name"
+		exit $FAILURE
+	fi
+
+	# Get partition info and save it in a file.
+	_FDISKLOG=$2-$STAMP-$1.fdisk
+	fdisk /dev/$1 <<!EOF >$_FDISKLOG 2>&1
+p
+q
+!EOF
+	if [ $? -ne 0 ]
+	then
+		echo "Error running fdisk"
+		cat $_FDISKLOG
+		exit $FAILURE
+	fi
+
+	# Get partition table and save it as a disk block.
+	_DDLOG=$2-$STAMP-$1.ddlog
+	dd if=/dev/$1 of=$2-$STAMP-$1.blk bs=512 count=1 >$_DDLOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error running dd"
+		cat $_DDLOG
+		exit $FAILURE
+	fi
+	rm -f $_DDLOG
+}
+
+# Save file system into a tar file.
+# Arguments: device tarname.
+# device is the device file (full path) like /devsda or /dev/hda.
+# tarname is the name used for the .tar.gz backup.
+
+savetar() {
+	if [ "$1" = "" -o "$2" = "" ]
+	then
+		echo "Specify device name and tar name"
+		exit $FAILURE
+	fi
+	_TARDEV=$1
+	_TARNAME=$2
+	_TARDEVNAME="`basename $_TARDEV`"
+	_TARFILENAME=$SAVEDIR/$_TARNAME-$STAMP-$_TARDEVNAME
+	_TAR=$_TARFILENAME.tar.gz
+	_TARLOG=$_TARFILENAME.log
+	_TARLST=$_TARFILENAME.lst
+	_TARMNT=/tar
+	case $_TAR in
+	/*)
+		;;
+	*)
+		echo "Tar archive pathname $_TAR is not absolute"
+		exit $FAILURE
+		;;
+	esac
+	case $_TARMNT in
+	/*)
+		;;
+	*)
+		echo "Mount point name $_TARMNT is not absolute"
+		exit $FAILURE
+		;;
+	esac
+	if [ ! -d $_TARMNT ]
+	then
+		mkdir $_TARMNT
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot create mount point $_TARMNT"
+			exit $FAILURE
+		fi
+	fi
+	mount $_TARDEV $_TARMNT
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot mount file system $_TARDEV on $_TARMNT"
+		exit $FAILURE
+	fi
+	_TARPWD="`pwd`"
+	cd $_TARMNT
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot cd to $_TARMNT"
+		exit $FAILURE
+	fi
+	tar -b 8192 -z -c -f $_TAR . >$_TARLOG 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error backing up $_TARMNT as $_TAR"
+		exit $FAILURE
+	fi
+	cd $_TARPWD
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot cd to $_TARPWD"
+		exit $FAILURE
+	fi
+	umount $_TARMNT
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot unmount $_TARMNT"
+		exit $FAILURE
+	fi
+	tar -z -t -v -f $_TAR >$_TARLST 2>&1
+	if [ $? -ne 0 ]
+	then
+		echo "Error running tar to create file list in archive"
+		exit $FAILURE
+	fi
+	rmdir $_TARMNT
+	if [ $? -ne 0 ]
+	then
+		echo "Error removing mount point $_TARMNT"
+		exit $FAILURE
+	fi
+}
+
+# Save partition to an image.
+# Arguments: devicename imagename
+# devicename is the device file name in the /dev directory like sda or hda.
+# imagename is the name used for the image backup.
+# When the device is a Linux LVM partition saves all logicel volumes in it.
+
+save() {
+	if [ "$1" = "" -o "$2" = "" ]
+	then
+		echo "Specify device name and image name"
+		exit $FAILURE
+	fi
+	_IMGDEVNAME=$1
+	_IMGNAME=$2
+	_IMGPART=/dev/$_IMGDEVNAME
+	_IMGFILENAME=$SAVEDIR/$_IMGNAME-$STAMP-$_IMGDEVNAME
+	_IMAGE=$_IMGFILENAME.img
+	_IMGLOG=$_IMGFILENAME.log
+	_LVLOG=$_IMGFILENAME.lvs
+
+	# If we got LVM installed create list of logical volumes on this partition.
+	_LVPART=""
+	if [ -r /sbin/lvdisplay ]
+	then
+
+		# File to hold list of logical volumes on this partition.
+		_LVLIST=mkbackup.lvlist.$$.tmp
+		if lvdisplay -m 2>&1 | \
+			awk '/LV Name|VG Name|Physical volume/ { print $3  } ' | \
+			columns -c 3 | grep $_IMGPART >$_LVLIST 2>/dev/null
+		then
+			_LVPART="`cat $_LVLIST | awk ' { print $1 } '`"
+		fi
+		rm -f $_LVLIST
+	fi
+	if [ "$_LVPART" != "" ]
+	then
+
+		# Save logical volume info.
+		lvdisplay -m >$_LVLOG 2>&1
+
+		# There are logical volumes on this partition, back them up one by one.
+		for _LV in $_LVPART
+		do
+			_LVNAME="`basename $_LV`"
+			_IMGFILENAME=$SAVEDIR/$_IMGNAME-$STAMP-$_LVNAME
+			_IMAGE=$_IMGFILENAME.img
+			_IMGLOG=$_IMGFILENAME.log
+			if [ "$VERBOSE" = "yes" ]
+			then
+				printf " %s" $_LVNAME
+			fi
+			if [ "$TAR" = "yes" ]
+			then
+				savetar $_LV $_IMGNAME
+			fi
+			if [ "$IMAGE" = "yes" ]
+			then
+				partimage save -z1 -c -V2048 -f3 -b -B=foo -d -o \
+					$_LV $_IMAGE >$_IMGLOG 2>&1
+				if [ $? -ne 0 ]
+				then
+					echo "Error running partimage for $_FILENAME"
+					cat $_IMGLOG
+					exit $FAILURE
+				fi
+			fi
+		done
+	else
+		if [ "$VERBOSE" = "yes" ]
+		then
+			printf " %s" $_IMGDEVNAME
+		fi
+		if [ "$TAR" = "yes" ]
+		then
+			savetar $_IMGPART $_IMGNAME
+		fi
+		if [ "$IMAGE" = "yes" ]
+		then
+			partimage save -z1 -c -V2048 -f3 -b -B=foo -d -o \
+				$_IMGPART $_IMAGE >$_IMGLOG 2>&1
+			if [ $? -ne 0 ]
+			then
+				echo "Error running partimage for $_IMGPART"
+				cat $_IMGLOG
+				exit $FAILURE
+			fi
+		fi
+	fi
+}
+
+# Deal with switches. Switches should come before arguments.
+
+# Default values.
+IMAGE=no
+TAR=no
+VERBOSE=no
+SWITCH="$1"
+case $SWITCH in
+-*|--*)
+	;;
+*)
+	SWITCH=""
+	;;
+esac
+while [ "$SWITCH" != "" ]
+do
+	case $SWITCH in
+	--image|-image|-i)
+
+		# Use image.
+		IMAGE=yes
+		shift
+		;;
+	--tar|-tar|-t)
+
+		# Use tar instead of image.
+		TAR=yes
+		shift
+		;;
+	--verbose|-verbose|-v)
+
+		# Verbose messages.
+		VERBOSE=yes
+		shift
+		;;
+	--*|-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	esac
+	SWITCH="$1"
+	case $SWITCH in
+	-*)
+		;;
+	*)
+		SWITCH=""
+		;;
+	esac
+done
+case ${IMAGE}${TAR} in
+*yes*)
+	;;
+*)
+	IMAGE=yes
+	TAR=no
+	;;
+esac
+export IMAGE TAR VERBOSE
+
+# After switches deal with the arguments.
+
+# Directory for partimage backups. Absolutized.
+SAVEDIR=${1-.}
+if [ ! -d $SAVEDIR ]
+then
+	echo "Cannot find save directory $SAVEDIR"
+	exit $FAILURE
+fi
+case $SAVEDIR in
+/*)
+	;;
+*)
+	SAVEDIR="`pwd`/$SAVEDIR"
+	;;
+esac
+export SAVEDIR
+shift
+
+# Name to use for the backups.
+NAME=${1-backup}
+export NAME
+shift
+
+# Disk name and disk device file name.
+DISK=${1-sda}
+case $DISK in
+*[0-9])
+	echo "Disk ends with a number - use the disk name only"
+	exit $FAILURE
+	;;
+/*)
+	echo "Disk starts with a / - use only the name"
+	exit $FAILURE
+	;;
+esac
+DISKDEVICE=/dev/$DISK
+if [ ! -r $DISKDEVICE ]
+then
+	echo "Cannot find device $DISKDEVICE"
+	exit $FAILURE
+fi
+export DISK DISKDEVICE
+shift
+
+# Main starts here after options and arguments.
+
+# Partitions to back up.
+PARTITIONS="$*"
+for P in $PARTITIONS
+do
+	case $P in
+		/*)
+			echo "Partition starts with a / - use only the number"
+			exit $FAILURE
+			;;
+		[0-9]|[0-9][0-9]|[0-9][0-9][0-9])
+			;;
+		*)
+			echo "Partition is not a number - use only the number"
+			exit $FAILURE
+			;;
+	esac
+
+	# Check.
+	DEVICEFILE=/dev/${DISK}${P}
+	if [ ! -r $DEVICEFILE ]
+	then
+		echo "Cannot find $DEVICEFILE"
+	fi
+done
+export PARTITIONS
+
+# Log file.
+LOG=$SAVEDIR/${NAME}-${STAMP}.log
+
+# Set umask.
+umask 0066
+
+# Partitions not specified, create default list of partitions.
+if [ "$PARTITIONS" = "" ]
+then
+
+	# Partitions listed on the disk.
+	PARTLISTFILE=mkbackup.part.$$.tmp
+
+	# Mounted partitions.
+	MOUNTED=mkbackup.mnt.$$.tmp
+
+	# List Linux partition numbers into the file.
+	cat <<!EOF | fdisk $DISKDEVICE | egrep -e '[0-9a-f][0-9a-f]  Linux' | grep -v swap | awk ' { print $1 } ' | sed 's/\/dev\///; s/[a-zA-Z]*//' >$PARTLISTFILE
+p
+q
+!EOF
+
+	# Get a list of mounted partitions, first the directly mounted.
+	df | egrep -e '^/dev/' | awk ' { print $1 } ' | grep $DISKDEVICE | sed 's/\/dev\///; s/[a-zA-Z]*//' >$MOUNTED
+
+	# Add the ones via logical volume manager from the same disk.
+	df | egrep -e '^/dev/mapper/' | awk ' { print "lvdisplay -m 2>&1 " $1 } ' | sh | grep "Physical volume" | awk ' { print $3 } ' | sed 's/\/dev\///; s/[a-zA-Z]*//' >>$MOUNTED
+
+	# Compile a list, mounted partitions removed.
+	PARTITIONS="`cat $PARTLISTFILE | grep -v -f $MOUNTED`"
+
+	# Clean up.
+	rm -f $PARTLISTFILE $MOUNTED
+fi
+
+# Back up partitions if any.
+if [ "$PARTITIONS" != "" ]
+then
+
+	# Save partition table information.
+	if [ "$VERBOSE" = "yes" ]
+	then
+		echo "Image backup started on `hostname` at `date`"
+		printf "Backing up %s" $DISK
+	fi
+	savepart $DISK $NAME
+
+	# Save partitions into image files.
+	for P in $PARTITIONS
+	do
+		save ${DISK}${P} $NAME
+	done
+	if [ "$VERBOSE" = "yes" ]
+	then
+		printf "\n"
+		echo "Finished on `hostname` at `date`"
+	fi
+fi
+
+# Finish.
+exit $SUCCESS
+

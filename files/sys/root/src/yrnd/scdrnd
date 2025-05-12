@@ -1,0 +1,231 @@
+#!/bin/sh
+
+# Get randomness from Yubikey using gpg.
+
+# This is using the generic SCD GPG interface.
+# Requires Perl to remove some headers and trailers.
+# This is part of the GNUPG smartcard operations. The
+# standard defines a way of getting random numbers from
+# the card. The command gpg-connect-agent will invoke
+# gpg-agent which will start scdaemon which will talk to
+# pcscd, who will talk to the card and get the random bytes.
+# This seems rather convoluted so the yrnd just talks directly
+# to the card instead. Also google-ing finds mostly hits suggesting
+# only to use the first part of the command which will leave in the
+# headers and trailers.
+
+# Appearantly this does not work any more, SCD RANDOM returns
+# ERR 100696144 Operation not supported by device <SCD>
+# which is strange. (Note that it never worked on the older version
+# of Yubikey. However:
+#   piv-tool --send-apdu 00:87:00:9B:04:7C02:81:00:00
+#   Using reader with a card: Yubico YubiKey OTP+FIDO+CCID 00 00
+#   Sending: 00 87 00 9B 04 7C 02 81 00 00
+#   Received (SW1=0x90, SW2=0x00):
+#   7C 0A 81 08 9A E5 A7 AA 4D 03 46 AB |.......M.F.
+# seems to be working, also my yrnd program works too.
+# We need the small utility 'binarize' and 'hexify'.
+
+# Quit on error.
+set -e
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help)
+	cat <<!EOF
+This script obtains random binary bytes from the
+Yubikey. They are coming on the standard output.
+Usage:
+    scdrnd [-b][-x][-p][-g] [n]
+where
+    -b      binary output on stdout.
+    -x      hex print output. This is the default.
+    -p      use PIV AUTHENTICATION CHALLENGE 8 byte call.
+    -g      use GPG interface with SCD RANDOM.
+            This is the default.
+    n       is the number of bytes to get. The maximum
+            is 8192. Will be truncated to the nearest
+            multiplier of 8. The default is 8.
+The default is printed hex and PIV.
+When switches applied repeatedly the last one will apply.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+EXES="binarize hexify"
+for E in $EXES
+do
+	if which $E >/dev/null 2>&1
+	then
+		:
+	else
+		echo "Cannot find $E"
+		exit 1
+	fi
+done
+if usbdevs | grep YubiKey >/dev/null
+then
+
+	# OK.
+	:
+else
+	echo "Cannot find YubiKey"
+	exit 1
+fi
+
+# Options.
+BIN=no
+HEX=yes
+PIV=no
+GPG=yes
+FUN=ykrandomgpg
+while true
+do
+	case $1 in
+	-b|--binary|-binary)
+		shift
+		BIN=yes
+		HEX=no
+		;;
+	-x|--hex|-hex)
+		shift
+		HEX=yes
+		BIN=no
+		;;
+	-g|--gpg|-gpg)
+		shift
+		GPG=yes
+		PIV=no
+		FUN=ykrandomgpg
+		;;
+	-p|--piv|-piv)
+		shift
+		PIV=yes
+		GPG=no
+		FUN=ykrandompiv
+		;;
+	-*)
+		echo "Unknown switch $1"
+		exit $FAILURE
+		;;
+	*)
+		break
+		;;
+	esac
+done
+
+# Number of bytes.
+N="$1"
+if [ "$N" = "" ]
+then
+	N=8
+fi
+if [ $N -eq 0 ]
+then
+	echo "Do not specify zero"
+	exit $FAILURE
+fi
+case $N in
+[1-9][0-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9]|[1-9])
+
+	# Maximum five digits.
+	;;
+*)
+	echo "Wrong number, maximum five digits"
+	exit $FAILURE
+	;;
+esac
+
+# Check.
+if [ $N -gt 8192 ]
+then
+	echo "Number too large"
+	exit $FAILURE
+fi
+NBLOCKS="`expr $N / 8`"
+
+# This section does not work any more.
+# Actually there is a workaround. Apperantly this is for the reason
+# that they changed the default mode to CCID. So to talk him out of it
+# you need a config file under the .gnupg directory, scdaemon.conf and
+# in that file a line 'disable-ccid'.
+#
+
+# Get random numbers with SCD RANDOM, this is not the same as the
+# GENERAL AUTHENTICATE which just returns 8 byte in an invocation.
+
+ykrandomgpg() {
+
+	# Create directory to avoid crash.
+	GPGDIR=$HOME/.gnupg
+	if [ ! -d $GPGDIR ]
+	then
+		mkdir $GPGDIR
+		chmod og-rwx $GPGDIR
+	fi
+
+	# Put disable-cid into config file. This is a workaround.
+	CNF=$GPGDIR/scdaemon.conf
+	if [ -e $CNF ]
+	then
+		if grep disable-ccid  $CNF >/dev/null
+		then
+			:
+		else
+			echo "disable-ccid" >>$CNF
+		fi
+	else
+		echo "disable-ccid" >$CNF
+	fi
+
+	# Run the connect agent to get random numbers.
+	# Will start scdaemon. Perl magic removes headers.
+	# Output binary.
+	gpg-connect-agent "SCD RANDOM ${N}" /bye 2>/dev/null | \
+		perl -pe 'chomp;s/^D\s//;s/%(0[AD]|25)/chr(hex($1))/eg;if(eof&&/^OK$/){exit}'
+	sleep 2
+
+	# Kill the gpg agent left behind.
+	PID="`ps -axu | grep gpg-agent | grep -v grep | grep $GPGDIR | awk ' { print $2 } '`"
+	if [ "$PID" != "" ]
+	then
+		kill $PID
+	fi
+}
+
+# Instead, with piv-tool (would also work with opensc-tool the same way).
+# Returns 8 bytes of randomness for each call. Uses the GENERAL AUTHENTICATE command.
+
+ykrandompiv() {
+	I=0
+	while [ $I -lt $NBLOCKS ]
+	do
+		piv-tool --send-apdu 00:87:00:9B:04:7C02:81:00:00 2>/dev/null | tail -1 | \
+			sed 's/ |.*$//' | \
+		while read A B C D REST
+		do
+
+			# The last eight bytes are random, supposedly there is some kind
+			# of a header in front, which we ignore.
+			echo "$REST"
+		done
+		I=`expr $I + 1`
+	done | binarize
+}
+
+if [ $HEX = yes ]
+then
+	$FUN | hexify
+else
+	$FUN
+fi
+
+# Finish
+exit $SUCCESS
+

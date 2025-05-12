@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# Reboot, OpenBSD on miletus.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Do not print help.
+
+# Check.
+if [ `id -u` !=  0 ]
+then
+	echo "You have to be root to run this script"
+	exit $FAILURE
+fi
+
+# Clear screen on console, just in case.
+if [ -x /root/bin/wsswitch ]
+then
+	/root/bin/wsswitch 1
+fi
+echo -n '[?25l[H[J'
+echo -n '[?25l[H[J' >/dev/console
+
+# Reboot.
+cd /
+/usr/bin/nohup /sbin/shutdown -r now >/dev/null 2>&1 &
+
+# Finish.
+exit $SUCCESS
+

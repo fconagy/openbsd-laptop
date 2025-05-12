@@ -1,0 +1,30 @@
+/dev/rsd5i: 124492240 sectors in 15561530 FAT32 clusters (4096 bytes/cluster)
+bps=512 spc=8 res=32 nft=2 mid=0xf8 spt=63 hds=255 hid=64 bsec=124735424 bspf=121575 rdcl=2 infs=1 bkbs=2
+Disk: sd5       geometry: 7764/255/63 [124735488 Sectors]
+Offset: 0       Signature: 0xAA55
+            Starting         Ending         LBA Info:
+ #: id      C   H   S -      C   H   S [       start:        size ]
+-------------------------------------------------------------------------------
+ 0: 00      0   0   0 -      0   0   0 [           0:           0 ] Unused
+ 1: 00      0   0   0 -      0   0   0 [           0:           0 ] Unused
+ 2: 00      0   0   0 -      0   0   0 [           0:           0 ] Unused
+*3: 0C      0   1   2 -   7764 108  24 [          64:   124735424 ] Win95 FAT32L
+# /dev/rsd5c:
+type: SCSI
+disk: SCSI disk
+label: Sandisk SD64G
+duid: 0000000000000000
+flags:
+bytes/sector: 512
+sectors/track: 63
+tracks/cylinder: 255
+sectors/cylinder: 16065
+cylinders: 7764
+total sectors: 124735488
+boundstart: 0
+boundend: 124735488
+
+16 partitions:
+#                size           offset  fstype [fsize bsize   cpg]
+  c:        124735488                0  unused
+  i:        124735424               64   MSDOS

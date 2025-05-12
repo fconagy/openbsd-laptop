@@ -1,0 +1,59 @@
+.TH QRNGD "8" "2022-06-11" "Quantis RNG Daemon" "System Commands"
+
+.SH NAME
+qrngd \- Quantis hardware random number generator daemon
+
+.SH SYNOPSYS
+.B qrngd
+.B [ \-b \fIbufsize\fP ]
+.B [ \-n \fIn\fP ]
+.B [ \-s \fIsleep\fP ]
+.B [ \-d \fIlevel\fP ]
+.B [ \-v ]
+.B [ \-w ]
+.B [ \-h ]
+
+.SH DESCRIPTION
+This is a daemon which runs in the background, time to
+time reads from the Quantis harware RNG device and
+mixes the result into the system entropy pool. You can
+specify the time period to sleep after the mix in seconds
+as a floating point number.
+
+.TP
+.B \-b \fIbufsize\fR
+buffer size for the random bytes. The default is 512 bytes,
+which is the preferred buffer size for the device.
+
+.TP
+.B \-n \fIn\fR
+how many buffers of random bytes to obtain and
+mix in one go. The default is one.
+
+.TP
+.B \-s \fIsleep\fR
+the time period to wait before waking up and getting
+an another batch of random data to mix in. It is to be
+specified in seconds as a floating point number. The
+default is one second.
+
+.TP
+.B \-d \fIlevel\fR
+debug level. Note that greater than 16 will disable
+the mixing entirely. Debug levels greater than 8 will
+not daemonize. The default is 0.
+
+.TP
+.B \-v
+verbose output.
+
+.TP
+.B \-w
+wait for the device to be connected.
+
+.TP
+.B \-h
+print this help.
+
+.RE
+

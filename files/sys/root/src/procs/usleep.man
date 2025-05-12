@@ -1,0 +1,22 @@
+.TH USLEEP "8" "2022-06-21" "Microsecond sleep" "System Commands"
+
+.SH NAME
+usleep \- Microsecond sleep
+
+.SH SYNOPSYS
+.B usleep \fIuseconds\fP
+.B [ \-h ]
+
+.SH DESCRIPTION
+This small program is just a wrapper around the usleep(3) call.
+
+.TP
+.B \-b \fIuseconds\fR
+is the time period to sleep in microseconds.
+
+.TP
+.B \-h
+print this help.
+
+.RE
+

@@ -1,0 +1,49 @@
+
+
+    Fingerprint
+
+Build the fingerprint login style.
+  cd /usr/ports/sysutils/login_fingerprint
+  make
+That will build and install libfprint 8.2 which
+in fact does not work. At least not for the UPEK I got.
+But it gives the source for those.
+  cd /usr/ports/security/libfprint
+  make deinstall
+
+Use the files from the FreeBSD 11 ports directory tree
+which would be libfprint version 0.7.0.
+  cd fingerprint/fprint-freebsd-11
+  cd src
+  tar -z -xf ../tar/libfprint.tar.gz
+  cd libfprint-0.7.0
+
+It is prepared to compile now. Since this was lifted
+from an already built system the patches are already done.
+In case you would need the patches:
+  patch < ../../files/patch-config.h.in
+  patch < ../../files/patch-libfprint-drivers-vfs301.c
+  patch < ../../files/patch-libfprint-drivers-vfs301_proto.c
+  patch < ../../files/patch-libfprint-drivers-vfs301_proto.h
+  patch < ../../files/patch-libfprint_Makefile.in
+
+Then the usual:
+  make clean
+  ./configure --disable-udev-rules
+  make
+It will fail when it tries to deal with the udev rules. We have
+no udev on OpenBSD. So this needs to be disabled in the make file.
+Also try compile with gcc and -O0.
+Re-run and then:
+  make install
+will also put files under /usr/local/libdata/pkgconfig which is
+a FreeBSD thing I presume it should be OK.
+We should have libfprint now.
+
+Buld fprint_demo
+  export FPRINT_CFLAGS="-I/usr/local/include/libfprint"
+  export FPRINT_LIBS="-L/usr/local/lib -lfprint"
+  ./configure
+  make
+
+

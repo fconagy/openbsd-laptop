@@ -1,0 +1,1265 @@
+#!/bin/sh
+
+# Modify system files with a bit of control.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case $1 in
+-h|--help|-help|help)
+
+	# Print help.
+	cat <<!EOF
+This script saves and restores config files.
+Usage:
+    mod [host host] file | save file... |
+        dir [file] | dirlast | dirs | dirt | diro | ls
+        grep pattern | dedup [dir] |
+        restore file [date] | remove file | rm file | diff file date |
+        checkpoint [dir] | restart [--check|--diff] [snapdir] [file] |
+        dirchkpt [dir] | diffchkpt [dir]| changed [restored] |
+        edit pattern | relocate from to | import listfile |
+        exec pattern command
+where
+    host host           to specify a different hostname to use.
+    save file           to save the named file. This is the default.
+    orig save file      save the file, also create a copy with the extension .orig.
+    dir file            to list saved files matching the specified pattern.
+    dirlast             to list only the last one of saved files
+                        matching the specified pattern.
+    dirs                dir sorted, list directory sorted unique.
+    dirsn               dir sorted by name, list directory sorted by name.
+    dirt                dir tail, list only the last few files.
+    diro                list files for which there is a .orig saved copy.
+    ls                  list of modded files with the current system file
+                        tagged with a star.
+    grep pattern        grep for the pattern in all modded files.
+    dedup [dir]         remove older copies which are the same.
+    purge [dir]         remove extra copies.
+    restore file date   to restore a saved file which matches the specified
+                        pattern. It is not possible to restore more than one
+                        file at a time.
+    remove file         remove the given file from the mod directory. Specify
+                        absolute pathname.
+    rm file             same as above.
+    diff file date      list differences between a config file and saved copy.
+    checkpoint [dir]    create a snapshot of all modified files as current.
+                        Will be placed under the mod directory in a directory
+                        named as hostname.chkpt or as the specified name.
+    restart [--check|--diff] [dir] [file] overwrite files using the last
+                       checkpoint from dir.
+                        --check just checking.
+                        --diff prints diff report.
+    dirchkpt [cdir]     list the names of saved checkpoint directories or files
+                        in saved checkpoints.
+    diffchkpt [cdir]    diff would be shown between the saved checkpoint files
+                        and current ones.
+    changed [restored]  list changed/restored files.
+    edit pattern        to edit the file with the name matching the pattern.
+                        For multiple match the last one will be selected.
+    relocate from to    relocate the saved directory structure as it is from
+                        host 'from' to a new host 'to'. Will copy all files to
+                        under the new name. This is to deal with a mod directory
+                        coming from an old host what we need to make current on
+                        a new host.
+    import listfile     import files which had been saved as .orig.
+                        Expects a name of a file which contains a list of file names,
+                        that is the .orig files. You can create this list like:
+                            find / -type f -name '*.orig' -print >orig.list
+                        then review the list and run 'mod import orig.list'.
+    exec pattern command to execute a command for matching modded files.
+                        A single - means select all files.
+    deorig pattern      de-origize files. Remove the .orig saved copy for all
+                        modded files. Default is all files.
+    reorig pattern      re-origize files. Create .orig file from the modded saved file.
+                        Default is all files.
+    listorig pattern    lists the files with save .orig copies.
+    patch               probably you mean mod-patch so report that.
+
+The files are stored under directory <user_home>/mod/<hostname>.
+A log is created there about the changes made.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Save file with extension .orig.
+SAVE_ORIG=no
+case $1 in
+orig|--orig|-orig)
+	SAVE_ORIG=yes
+	shift
+	;;
+esac
+
+# Hostname. Can be specified using --host switch.
+HOSTNAME="`hostname | sed 's/\..*$//'`"
+if [ "$HOSTNAME" = "" ]
+then
+	echo "Host name not set"
+	exit $FAILURE
+fi
+case $1 in
+host|--host|-host|-H)
+	shift
+	HOSTNAME=$1
+	case $HOSTNAME in
+	-*)
+		echo "Invalid hostname $HOSTNAME"
+		exit $FAILURE
+		;;
+	"")
+		echo "Specify hostname"
+		exit $FAILURE
+		;;
+	esac
+	MODHOME=$HOME/mod
+	MODDIR=$MODHOME/$HOSTNAME
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+	shift
+	;;
+*)
+	MODHOME=$HOME/mod
+	MODDIR=$MODHOME/$HOSTNAME
+	;;
+esac
+
+# Time stamp, sorts.
+STAMP="`date +%Y%m%dT%H%M%S`"
+
+# Date, ISO-like.
+ISODATE="`date +%Y-%m-%dT%H:%M:%S`"
+
+# Real userid.
+RUSER="`id -u -r -n`"
+
+# Directory containing modification data. Create if necessary.
+if [ ! -d $MODDIR ]
+then
+	mkdir -p $MODDIR
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot create save directory $MODDIR"
+		exit $FAILURE
+	fi
+fi
+
+# Log files.
+ALLLOG=$MODHOME/mod.log
+HOSTLOG=$MODHOME/$HOSTNAME.log
+
+# Create log entry.
+
+log() {
+	echo "$ISODATE $HOSTNAME $RUSER $*" >>$ALLLOG
+	echo "$ISODATE $RUSER $*" >>$HOSTLOG
+}
+
+# Save file.
+# Argument is the name of file to save.
+
+save_file() {
+
+	# Check and canonicize name.
+	if [ "$1" = "" ]
+	then
+		echo "Specify file"
+		exit $FAILURE
+	fi
+	if [ ! -r $1 ]
+	then
+		echo "Cannot find $1"
+		exit $FAILURE
+	fi
+	if [ -L $1 ]
+	then
+		LINKPTR="`ls -l $1 | sed 's/^.*->//'`"
+		echo "$1 is a soft link to $LINKPTR, mod the file instead"
+		exit $FAILURE
+	fi
+	if [ -d $1 ]
+	then
+		echo "$1 is a direcctory"
+		exit $FAILURE
+	fi
+	if [ -c $1 -o -b $1 ]
+	then
+		echo "$1 is a device file"
+		exit $FAILURE
+	fi
+	case $1 in
+	/*)
+		NAME=$1
+		;;
+	*)
+		NAME=`pwd`/$1
+		;;
+	esac
+
+	# Check.
+	case $NAME in
+	*--*)
+		echo "There is already a -- in that name"
+		exit $FAILURE
+		;;
+	esac
+	if [ ! -r $NAME ]
+	then
+		echo "Cannot find $NAME"
+		exit $FAILURE
+	fi
+	if [ "$MODDIR" = "" ]
+	then
+		echo "No mod directory - confused"
+		exit $FAILURE
+	fi
+
+	# Transform name and save.
+	SAVED="${STAMP}=`echo $NAME | sed 's/\//--/g'`"
+	cp -p $1 $MODDIR/$SAVED
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot save file $1"
+		exit $FAILURE
+	fi
+	if [ $SAVE_ORIG = yes ]
+	then
+		ORIGSAVE=${NAME}.orig
+		if [ ! -e $ORIGSAVE ]
+		then
+			cp -p $NAME $ORIGSAVE
+		else
+			echo "Already have $ORIGSAVE"
+		fi
+		log ${NAME}.orig created
+	fi
+	log $NAME saved
+}
+
+# List files.
+# Argument is the file name.
+
+list_file() {
+	cd $MODDIR
+	if [ "$1" = "" ]
+	then
+		ls | sed 's/--/\//g'
+	else
+		ls | sed 's/--/\//g' | grep $1
+	fi
+}
+
+# Dedup files. Remove successive ones which are the same.
+
+dedup_files()
+{
+	if [ "$1" != "" ]
+	then
+		if [ ! -d $MODHOME/$1 ]
+		then
+			echo "Cannot find $MODHOME/$1"
+			exit $FAILURE
+		fi
+		cd $MODHOME/$1
+	else
+		cd $MODDIR
+	fi
+	PREV=""
+	ls | sort -t '=' -k 2 -k 1 | while read F REST
+	do
+		if [ "$PREV" != "" ]
+		then
+			if diff $PREV $F >/dev/null
+			then
+
+				# Same as previous.
+				rm $PREV
+				if [ $? -ne 0 ]
+				then
+					echo "$PREV could not be removed"
+					exit $FAILURE
+				fi
+				NAME="`echo $PREV | sed 's/--/\//g; s/^.*=//'`"
+				echo "$PREV removed"
+			else
+				echo "$PREV stays"
+			fi
+		fi
+		PREV=$F
+	done
+}
+
+# Purge files. Remove multiples and leave only the last one.
+
+purge_files()
+{
+	if [ "$1" != "" ]
+	then
+		if [ ! -d $MODHOME/$1 ]
+		then
+			echo "Cannot find $MODHOME/$1"
+			exit $FAILURE
+		fi
+		cd $MODHOME/$1
+	else
+		cd $MODDIR
+	fi
+	PREV=""
+	ls | sort -t '=' -k 2 -k 1 | while read F REST
+	do
+		if [ "$PREV" != "" ]
+		then
+
+			NAME1="`echo $PREV | sed 's/--/\//g; s/^.*=//'`"
+			NAME2="`echo $F | sed 's/--/\//g; s/^.*=//'`"
+			echo $F $PREV
+			echo $NAME1 $NAME2
+			if [ "$NAME1" = "$NAME2" ]
+			then
+
+				# Same as previous.
+				echo rm $PREV
+				if [ $? -ne 0 ]
+				then
+					echo "$PREV could not be removed"
+					exit $FAILURE
+				fi
+				#echo "$PREV removed"
+			fi
+		fi
+		PREV=$F
+	done
+}
+
+# Edit file.
+# Argument is the file name.
+
+edit_file() {
+	BEFORE="`pwd`"
+	if [ "$BEFORE" = "" ]
+	then
+		echo "Error running pwd - confused"
+		exit $FAILURE
+	fi
+	cd $MODDIR
+	if [ "$1" = "" ]
+	then
+		FILENAME="`ls | sed 's/--/\//g' | tail -1`"
+	else
+		FILENAME="`ls | sed 's/--/\//g' | grep $1`"
+	fi
+	MANY=no
+	if [ `echo $FILENAME | wc -w` -gt 1 ]
+	then
+		echo "More than one saved file matches"
+		sleep 1
+		LASTF="`ls | sed 's/--/\//g' | grep $1 | tail -1`"
+	fi
+	if [ `echo $FILENAME | wc -w` -eq 0 ]
+	then
+		echo "No saved file matches"
+		exit $FAILURE
+	fi
+	if [ "$LASTF" != "" ]
+	then
+		FILENAME="`echo $LASTF | sed 's/^.*=//'`"
+	else
+		FILENAME="`echo $FILENAME | sed 's/^.*=//'`"
+	fi
+
+	# Edit.
+	if [ ! -r $FILENAME ]
+	then
+		echo "Cannot read $FILENAME"
+		exit $FAILURE
+	fi
+	cd $BEFORE
+	if [ $? -ne 0 ]
+	then
+		echo "Cannot cd to $BEFORE - confused"
+		exit $FAILURE
+	fi
+	if [ "$EDITOR" = "" ]
+	then
+		if [ $READONLY = yes ]
+		then
+			view $FILENAME
+		else
+			vi $FILENAME
+		fi
+	else
+		$EDITOR $FILENAME
+	fi
+	cd $MODDIR
+}
+
+# Restore file from saved copy.
+# Arguments are file name and date to search.
+
+restore_file() {
+
+	# Grep in listing and assemble search name.
+	cd $MODDIR
+	if [ "$1" = "" ]
+	then
+		echo "Specify file"
+		exit $FAILURE
+	fi
+	if [ "$2" = "" ]
+	then
+		NUM="`ls | sed 's/--/\//g' | grep $1 | wc -l`"
+		if [ $NUM -eq 0 ]
+		then
+			echo "Cannot find saved file for $1"
+			exit $FAILURE
+		fi
+		if [ $NUM -gt 1 ]
+		then
+			echo "More than one file saved select using date"
+			exit $FAILURE
+		fi
+		SEARCH_NAME="`ls | sed 's/--/\//g' | grep $1`"
+	else
+		MODDATE="`echo $2 | sed 's/-//g; s/://g'`"
+		NUM="`ls | sed 's/--/\//g' | grep $1 | grep $MODDATE | wc -l`"
+		if [ $NUM -eq 0 ]
+		then
+			echo "Cannot find saved file for $1"
+			exit $FAILURE
+		fi
+		if [ $NUM -gt 1 ]
+		then
+			echo "Found $NUM saved file for $1 at $2"
+			exit $FAILURE
+		fi
+		SEARCH_NAME="`ls | sed 's/--/\//g' | grep $1 | grep $MODDATE`"
+	fi
+
+	# Create original and stored names and copy back.
+	STORED_NAME="`echo $SEARCH_NAME | sed 's/\//--/g'`"
+	ORIGINAL_NAME="`echo $SEARCH_NAME | sed 's/^.*=//'`"
+	if [ ! -r $STORED_NAME ]
+	then
+		echo "Cannot find saved file $STORED_NAME"
+		exit $FAILURE
+	fi
+	ORIGINAL_SAVED=$ORIGINAL_NAME.$STAMP.save
+	mv $ORIGINAL_NAME $ORIGINAL_SAVED
+	if [ $? -ne 0 ]
+	then
+		echo "Error saving $ORIGINAL_NAME"
+		exit $FAILURE
+	fi
+	cp -p $STORED_NAME $ORIGINAL_NAME
+	if [ $? -ne 0 ]
+	then
+		echo "Error restoring file $ORIGINAL_NAME"
+		echo "Restore current copy from $ORIGINAL_SAVED manually"
+		exit $FAILURE
+	fi
+	rm -f $ORIGINAL_SAVED
+	log $ORIGINAL_NAME restored from $SEARCH_NAME
+}
+
+# Diff files.
+# Arguments are filename and date.
+
+diff_file() {
+	if [ "$1" = "" ]
+	then
+		echo "Specify file"
+		exit $FAILURE
+	fi
+	NAME="$1"
+	DIR="`pwd`"
+
+	# Find file with this name among the saved files.
+	cd $MODDIR
+	if [ "$2" = "" ]
+	then
+		LASTFILE="`ls | sed 's/--/\//g' | grep $NAME | tail -1`"
+	else
+		MODDATE="`echo $2 | sed 's/-//; s/://'`"
+		LASTFILE="`ls | sed 's/--/\//g' | grep $NAME | grep $MODDATE | tail -1`"
+	fi
+	if [ "$LASTFILE" = "" ]
+	then
+		echo "Cannot find file for $1 $2"
+		exit $FAILURE
+	fi
+
+	# We got a saved file name.
+	case $NAME in
+	/*)
+
+		# Absoulte path, use as it is.
+		FILE="$NAME"
+		;;
+	*)
+
+		# Relative, use what we found, cut of date part.
+		FILE="`echo $LASTFILE | sed 's/^.*=//'`"
+		;;
+	esac
+
+	# Transform back to the original saved file name.
+	LASTFILE="`echo $LASTFILE | sed 's/\//--/g'`"
+	diff $FILE $MODDIR/`echo $LASTFILE`
+}
+
+# Make checkpoint.
+
+make_checkpoint() {
+	if [ "$1" = "" ]
+	then
+		CHKPTDIR=$MODHOME/$HOSTNAME.$STAMP.chkpt
+	else
+		CHKPTDIR="$1"
+	fi
+	if [ ! -d $CHKPTDIR ]
+	then
+		mkdir $CHKPTDIR
+		if [ $? -ne 0 ]
+		then
+			echo "Cannot create $CHKPTDIR"
+			exit $FAILURE
+		fi
+	else
+		echo "$CHKPTDIR already exists = confused"
+		exit $FAILURE
+	fi
+	# Actually this is not such a good idea.
+	# But we leave it here as a memento.
+	#	PWD="`pwd`"
+	#	cd $MODHOME
+	#	ln -s -f `basename $CHKPTDIR` $HOSTNAME.chkpt
+	# List is in the log file.
+	#LISTNAME=$MODHOME/$HOSTNAME.$STAMP.chklist
+	log Checkpointing
+	list_file | sed 's/^.*=//' | sort | uniq | while read FILE REST
+	do
+		echo "$FILE"
+		FULLNAME="$STAMP=`echo $FILE | sed 's/\//--/g'`"
+		if [ ! -r $FILE ]
+		then
+			echo "Orphan $FILE - continuing"
+		else
+			cp -p $FILE $CHKPTDIR/$FULLNAME
+			if [ $? -ne 0 ]
+			then
+				echo "Error checkpointing $FILE - continuing"
+			fi
+			log $FILE
+		fi
+	done
+	log Checkpointed
+}
+
+# Make restart from a checkpoint.
+
+make_restart() {
+	RCHECK=no
+	RDIFF=no
+	case $1 in
+	-c|--check)
+		RCHECK=yes
+		shift
+		;;
+	-d|--diff)
+		RDIFF=yes
+		shift
+		;;
+	-*|--*)
+		echo "Invalid switch $1"
+		exit $FAILURE
+		;;
+	esac
+	if [ "$1" = "" ]
+	then
+		CHKPTDIR="`ls -d $MODHOME/*.chkpt | tail -1`"
+	else
+		CHKPTDIR="$MODHOME/$1"
+	fi
+	if [ ! -d $CHKPTDIR ]
+	then
+		if [ ! -L $CHKPTDIR ]
+		then
+			echo "Cannot find checkpoint directory $CHKPTDIR"
+			exit $FAILURE
+		fi
+	fi
+	cd $CHKPTDIR
+	ls | while read FILE_NAME REST
+	do
+		ORIGINAL_NAME="`echo $FILE_NAME | sed 's/^.*=//; s/--/\//g'`"
+		if [ "$2" = "" -o "$2" = "$ORIGINAL_NAME" ]
+		then
+
+			# No name requested or matching name.
+			CHKPT_SAVE_NAME=$ORIGINAL_NAME.$STAMP.orig
+			if [ -r $ORIGINAL_NAME ]
+			then
+
+				# Restart for the file.
+				if diff $ORIGINAL_NAME $FILE_NAME >/dev/null 2>&1
+				then
+
+					# Same, don't do anything.
+					if [ $RDIFF = yes ]
+					then
+
+						# Diff, same.
+						echo "==== $ORIGINAL_NAME same"
+					elif [ $RCHECK = yes ]
+					then
+
+						# Check, same.
+						echo "$ORIGINAL_NAME same"
+					else
+
+						# Restart, same.
+						echo "$ORIGINAL_NAME same"
+					fi
+				else
+
+					# Different.
+					if [ $RDIFF = yes ]
+					then
+						echo "==== $ORIGINAL_NAME differs"
+						diff $ORIGINAL_NAME $FILE_NAME
+					elif [ "$RCHECK" = "yes" ]
+					then
+						echo "$ORIGINAL_NAME differs"
+					else
+
+						# Restart for the file.
+						# Do a mod save for the original file.
+						$0 $ORIGINAL_NAME
+						if [ $? -ne 0 ]
+						then
+							echo "Error mod-ding $ORIGINAL_NAME"
+							exit $FAILURE
+						fi
+
+						# Move out as saved copy.
+						mv $ORIGINAL_NAME $CHKPT_SAVE_NAME
+						if [ $? -ne 0 ]
+						then
+							echo "Cannot save $ORIGINAL_NAME as $CHKPT_SAVE_NAME"
+							exit $FAILURE
+						fi
+
+						# Overwrite with the checkpointed version.
+						cp -p $FILE_NAME $ORIGINAL_NAME
+						if [ $? -ne 0 ]
+						then
+							echo "Cannot replace $ORIGINAL_NAME"
+							echo "Check saved copy"
+							exit $FAILURE
+						fi
+						echo "$ORIGINAL_NAME overwritten"
+
+						# Leave saved .orig file for the time being.
+						rm -f $CHKPT_SAVE_NAME
+					fi
+				fi
+			else
+
+				# No original, it is a new file.
+				if [ $RDIFF = yes ]
+				then
+
+					# No original, can't diff.
+					echo "==== $ORIGINAL_NAME nofile"
+				elif [ $RCHECK = yes ]
+				then
+					echo "$ORIGINAL_NAME no file"
+				else
+
+					# Do the restart.
+					cp -p $FILE_NAME $ORIGINAL_NAME
+					if [ $? -ne 0 ]
+					then
+						echo "Cannot put $ORIGINAL_NAME"
+						exit $FAILURE
+					fi
+					echo "$ORIGINAL_NAME new file put in place"
+				fi
+			fi
+		fi
+	done
+	log Restart
+}
+
+# List checkpoints.
+
+dir_checkpoint() {
+	DN=$1
+	cd $MODHOME
+	if [ "$DN" = "" ]
+	then
+		for D in *.chkpt
+		do
+			echo $D
+		done
+	else
+		ls $DN | sed 's/^.*=//; s/--/\//g'
+	fi
+}
+
+# Arguments.
+READONLY=no
+case $1 in
+"")
+	echo "Specify name of config file"
+	exit $FAILURE
+	;;
+patch)
+	echo "Probably you mean mod-patch"
+	exit $FAILURE
+	;;
+dir|--dir|-dir|-d)
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+
+	# List saved files.
+	shift
+	FILE_SELECTOR="$1"
+	list_file "$FILE_SELECTOR" | awk -F'=' '
+ {
+	print substr($1,1,4) "-" substr($1,5,2) "-" substr($1,7,2) "T" \
+		substr($1,10,2) ":" substr($1,12,2) ":" substr($1,14,2) \
+		" " $2
+} '
+	;;
+ls|--ls|-ls)
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+
+	# List saved files.
+	shift
+	FILE_SELECTOR="$1"
+	list_file "$FILE_SELECTOR" | awk -F'=' '
+ {
+	print substr($1,1,4) "-" substr($1,5,2) "-" substr($1,7,2) "T" \
+		substr($1,10,2) ":" substr($1,12,2) ":" substr($1,14,2) \
+		" " $2
+} ' | while read TIMESTAMP FILE REST
+	do
+		if [ -r $FILE ]
+		then
+			printf "%-19s %s%s\n" "$TIMESTAMP" " " "$FILE"
+			TS="`stat -t '%Y-%m-%dT%H:%M:%S' -f '%t%Sm' $FILE | \
+sed 's/^[ 	]*//'`"
+			#FT="`stat -f '%Sp' $FILE`"
+			#FP="`stat -f '%Su %Sg' $FILE`"
+			FN="`stat -f '%N' $FILE`"
+			printf "%s %s%s\n" "$TS" "*" "$FN"
+		fi
+	done
+	;;
+exec|--exec|-exec|-e)
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+
+	# List saved files.
+	shift
+	FILE_SELECTOR="$1"
+	if [ "$FILE_SELECTOR" = "-" ]
+	then
+		FILE_SELECTOR=""
+	fi
+	shift
+	COMMAND="$*"
+	list_file "$FILE_SELECTOR" | awk -F'=' '
+ {
+	print substr($1,1,4) "-" substr($1,5,2) "-" substr($1,7,2) "T" \
+		substr($1,10,2) ":" substr($1,12,2) ":" substr($1,14,2) \
+		" " $2
+} ' | while read DATE NAME REST
+	do
+		echo "==== $NAME ===="
+		$COMMAND $NAME
+	done
+	;;
+grep|--grep|-grep|-g)
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+
+	# List saved files.
+	shift
+	GREP_PATTERN="$1"
+	if [ "$GREP_PATTERN" = "" ]
+	then
+		echo "Specify grep pattern"
+		exit $FAILURE
+	fi
+	list_file | awk -F'=' '
+ {
+	print substr($1,1,4) "-" substr($1,5,2) "-" substr($1,7,2) "T" \
+		substr($1,10,2) ":" substr($1,12,2) ":" substr($1,14,2) \
+		" " $2
+} ' | while read STAMP F REST
+	do
+		if grep "${GREP_PATTERN}" $F
+		then
+			echo "====> $STAMP $F"
+		fi
+	done
+	;;
+dirl|--dirl|dirlast|--dirlast|-dirlast|-dl)
+	if [ ! -d $MODDIR ]
+	then
+		echo "Cannot find $MODDIR"
+		exit $FAILURE
+	fi
+
+	# List saved files.
+	shift
+	FILE_SELECTOR="$1"
+	list_file "$FILE_SELECTOR" | sed 's/^.*=//' | sort -u
+	;;
+dirs|--dirs|-dirs|-ds)
+
+	# List saved files sorted.
+	list_file | sed 's/^.*=//' | sort -u
+	;;
+dirt|--dirt|-dirt|-dt)
+
+	# List saved files, the last few.
+	LINES="`stty -a | grep rows | awk ' { print $4 } '`"
+	LINES="`expr $LINES - 8`"
+	list_file | sed 's/^.*=//' | tail -${LINES}
+	;;
+dirsn|--dirsn|-dirsn)
+	list_file | sort -t '=' -k2
+	;;
+diro|--diro|-diro)
+
+	# List files we have a saved .orig for.
+	list_file | sed 's/^.*=//' | sort -u | while read F REST
+	do
+		if [ -r ${F}.orig ]
+		then
+			echo "$F"
+		fi
+	done
+	;;
+changed|--changed|-changed)
+
+	# List changed files.
+	shift
+	SHOW_RESTORED=no
+	case $1 in
+	restored|--restored|-restored)
+		shift
+		SHOW_RESTORED=yes
+		;;
+	esac
+	FILE_SELECTOR="$1"
+	list_file "$FILE_SELECTOR" | awk -F'=' '
+ {
+	print substr($1,1,4) "-" substr($1,5,2) "-" substr($1,7,2) "T" \
+		substr($1,10,2) ":" substr($1,12,2) ":" substr($1,14,2) \
+		" " $2
+} ' | \
+	awk ' { print $2 } ' | while read FILENAME REST
+	do
+		RESTORED="`grep $FILENAME $HOSTLOG | grep ' restored ' | tail -1`"
+		if [ "$SHOW_RESTORED" = "yes" ]
+		then
+			if [ "$RESTORED" != "" ]
+			then
+				echo $FILENAME
+			fi
+		else
+			if [ "$RESTORED" = "" ]
+			then
+				echo $FILENAME
+			fi
+		fi
+	done | sort | uniq
+	;;
+edit|--edit|-edit|-e)
+
+	# Edit config file.
+	shift
+	F="$1"
+	if [ "$F" = "" ]
+	then
+		echo "Editing the last modded file"
+		sleep 1
+	fi
+	edit_file $F
+	;;
+view|--view|-view)
+
+	# View config file.
+	shift
+	F="$1"
+	if [ "$F" = "" ]
+	then
+		echo "Editing the last modded file"
+		sleep 1
+	fi
+	READONLY=yes
+	edit_file $F
+	;;
+restore|--restore|-restore|-r)
+
+	# Restore saved file. Second argument is the date.
+	shift
+	restore_file $1 $2
+	;;
+save|--save|-save|-s)
+
+	# Save file, that is also the default.
+	shift
+	for F in $*
+	do
+		save_file $F
+	done
+	;;
+remove|--remove|-remove|rm|--rm|-rm)
+
+	# Remove file.
+	shift
+
+	# Check.
+	if [ "$1" = "" ]
+	then
+		echo "Specify modded file to be removed"
+		exit $FAILURE
+	fi
+	case $1 in
+	/*)
+		;;
+	*)
+		echo "Should be an absolute pathname"
+		exit $FAILURE
+		;;
+	esac
+
+	# Transform file name to modded one.
+	FILENAME="`echo $1 | sed 's/\//--/g'`"
+
+	# Get the file(s).
+	cd $MODDIR
+	if ls *${FILENAME} >/dev/null 2>&1
+	then
+		:
+	else
+		echo "Cannot find $1 as a modded file"
+		exit $FAILURE
+	fi
+
+	# Confirm.
+	echo "The following file(s) will be removed from the list of"
+	echo "modded files together with their saved copies"
+	for F in `ls *${FILENAME}`
+	do
+		echo $F | sed 's/--/\//g; s/^.*=//'
+	done
+	echo -n "Do you wish to continue [n]: "
+	read ANSWER
+	case $ANSWER in
+	y|[yY][eE][sS])
+		;;
+	*)
+		echo "Canceled"
+		exit $FAILURE
+	esac
+
+	# Remove.
+	for F in `ls *${FILENAME}`
+	do
+		rm $F
+		STATUS=$?
+		MODNAME="`echo $F | sed 's/--/\//g; s/^.*=//'`"
+		if [ $STATUS -ne 0 ]
+		then
+			echo "Error removing $MODNAME"
+			exit $FAILURE
+		else
+			log "$MODNAME removed from mod"
+			echo "$MODNAME removed from mod"
+		fi
+	done
+	;;
+diff|--diff|-diff|-d)
+
+	# List differences.
+	shift
+	diff_file $1 $2
+	;;
+checkpoint|--checkpoint|-checkpoint)
+	shift
+	make_checkpoint $1
+	;;
+restart|--restart|-restart)
+	shift
+	make_restart $1 $2
+	;;
+dirchkpt|--dirchkpt|-dirchkpt)
+	shift
+	dir_checkpoint $1
+	;;
+diffchkpt|--diffchkpt|-diffchkpt)
+	shift
+	make_restart -d $1 $2
+	;;
+checkchkpt|--checkchkpt|-checkchkpt)
+	shift
+	make_restart -c $1 $2
+	;;
+dedup|--dedup|-dedup)
+	shift
+	dedup_files
+	;;
+purge|--purge|-purge)
+	shift
+	purge_files
+	;;
+relocate|--relocate|-relocate)
+	shift
+	# Move. Now we copy.
+	#REL="mv"
+	# Copy the old ones. Same command for files and directories.
+	REL="cp -pr"
+	cd $MODHOME
+	FROM=$1
+	if [ "$FROM" = "" ]
+	then
+		echo "Specify old (incoming) name"
+		exit $FAILURE
+	fi
+	if [ ! -d $FROM ]
+	then
+		echo "Cannot find old (incoming) directory $FROM"
+		exit $FAILURE
+	fi
+	TO=$2
+	if [ "$TO" = "" ]
+	then
+		echo "Specify new name"
+		exit $FAILURE
+	fi
+	if [ ! -d $TO ]
+	then
+		mkdir $TO
+		if [ $? -ne 0 ]
+		then
+			echo "Error creating $TO"
+			exit $FAILURE
+		fi
+	fi
+
+	# Move current saved files to the incoming directory first if any.
+	for F in `ls $MODHOME/$TO`
+	do
+		$REL $F $FROM/
+		if [ $? -ne 0 ]
+		then
+			echo "Error running $REL $F $FROM/"
+			exit $FAILURE
+		fi
+	done
+	rmdir $MODHOME/$TO
+	if [ $? -ne 0 ]
+	then
+		echo "There is still stuff left in $MODHOME/$TO - confused"
+		echo "This directory at this point is expected to be empty"
+		exit $FAILURE
+	fi
+
+	# Move everything incoming.
+	for F in ${FROM}*
+	do
+		OLD=$F
+		NEW=`echo $OLD | sed "s/${FROM}/${TO}/g"`
+		$REL $OLD $NEW
+		if [ $? -ne 0 ]
+		then
+			echo "Error running $REL $OLD $NEW"
+			exit $FAILURE
+		fi
+	done
+	;;
+import)
+
+	# Import saved .orig files from a list.
+	shift
+	ORIGFILES="$1"
+	if [ "$ORIGFILES" = "" ]
+	then
+		echo "Specify the list of saved original files"
+		exit $FAILURE
+	fi
+	if [ ! -r $ORIGFILES ]
+	then
+		echo "Cannot find $ORIGFILES"
+		exit $FAILURE
+	fi
+	cat $ORIGFILES | while read ORIG
+	do
+
+		# Check.
+		case $ORIG in
+		/*.orig)
+			;;
+		*)
+
+			echo "Pathname $ORIG not absolute or does not end with .orig"
+			exit $FAILURE
+			;;
+		esac
+		if [ ! -f $ORIG ]
+		then
+			echo "$ORIG not a regular file or does not exist"
+			exit $FAILURE
+		fi
+		if file $ORIG | grep text >/dev/null
+		then
+			:
+		else
+			echo "$ORIG does not look like a text file, continuing"
+		fi
+
+		# Original file pathname.
+		NAME="`echo $ORIG | sed 's/\.orig$//'`"
+		case $NAME in
+		*--*)
+			echo "There is already a -- in that name"
+			exit $FAILURE
+			;;
+		esac
+
+		# Save the .orig file with the proper name.
+		SAVED="${STAMP}=`echo $NAME | sed 's/\//--/g'`"
+		cp -p $ORIG $MODDIR/$SAVED
+		if [ $? -ne 0 ]
+		then
+			echo "Error saving $NAME"
+			exit $FAILURE
+		fi
+		log $NAME imported
+	done
+	;;
+deduplist|purgelist)
+
+	# Make a list for deduplication purposes.
+	cd $MODDIR
+	ls | \
+		while read F REST
+	do
+		echo $F
+	done | sort -t '=' -k 2 | while read F
+	do
+		SIZE="`stat -f %z $F`"
+		NAME="`echo $F | sed 's/--/\//g; s/^.*=//'`"
+		DATE="`echo $F | sed 's/--/\//g; s/=.*$//'`"
+		printf "%12s %s %s %s\n" "$SIZE" "$DATE" "$NAME" "$F"
+	done
+	;;
+
+deorig|reorig|listorig|difforig)
+
+	# De-origize or re-origize files.
+	RIG="$1"
+	shift
+	cd $MODDIR
+	if [ "$1" = "" ]
+	then
+		ls | sed 's/^.*=//; s/--/\//g' | sort -u
+	else
+		ls | sed 's/^.*=//; s/--/\//g' | grep "$1" | sort -u
+	fi | while read F REST
+	do
+		ORIG=${F}.orig
+		MODDED="`echo $F | sed 's/\//--/g'`"
+		N="`ls | grep \"=$MODDED$\" | tail -1 | wc -l`"
+		if [ $N -ne 1 ]
+		then
+			echo "Error finding modded file for $F"
+			exit $FAILURE
+		fi
+		MODDED="`ls | grep \"=$MODDED$\"`"
+		case $RIG in
+		deorig)
+			if [ -e $ORIG ]
+			then
+				rm $ORIG
+				if [ $? -ne 0 ]
+				then
+					echo "Error removing $ORIG"
+					exit $FAILURE
+				fi
+			fi
+			;;
+		reorig)
+			if [ -e $ORIG ]
+			then
+				echo "$ORIG exists - reconcile"
+			else
+				if [ ! -e $MODDED ]
+				then
+					echo "Cannot find $MODDED - confused"
+					exit $FAILURE
+				fi
+				cp -p $MODDED $ORIG
+				if [ $? -ne 0 ]
+				then
+					echo "Error creating $ORIG"
+					exit $FAILURE
+				fi
+			fi
+			;;
+		listorig)
+			if [ -e $ORIG ]
+			then
+				echo "$ORIG"
+			fi
+			;;
+		difforig)
+			if [ -e $ORIG ]
+			then
+				echo ""
+				echo "==== $F"
+				diff $ORIG $F
+			fi
+			;;
+		esac
+	done
+	;;
+*)
+
+	# Default is to save file.
+	save_file $1
+	;;
+"")
+	echo "Specify the name of file"
+	exit $FAILURE
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+

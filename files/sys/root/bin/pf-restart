@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Restart packet filter.
+
+pfctl -F all
+pfctl -f /etc/pf.conf
+

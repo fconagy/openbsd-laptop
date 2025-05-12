@@ -1,0 +1,57 @@
+#!/bin/sh
+
+# Show temperature.
+
+# Const.
+SUCCESS=0
+FAILURE=1
+
+# Print help.
+case "${1}" in
+-h|--help|-help)
+	cat <<!EOF
+This script shows CPU temperature.
+Usage:
+    temp [-c interval]
+where
+    -c interval show temperature values contiguosly
+                every interval seconds.
+                The default interval is 1s.
+!EOF
+	exit $FAILURE
+	;;
+esac
+
+# Trap.
+trap 'exit 1' 1 2 3 15
+
+# Get temp from acpitz0.
+TEMP="`sysctl hw.sensors.acpitz0.temp0 | sed 's/^.*=//; s/ .*$//'`"
+USER="`top -1 -d 1 | grep CPUs | awk ' { print $3 } '`"
+echo "${TEMP}C ${USER}"
+case "${1}" in
+-c|--cycle|-cycle|cycle)
+
+	# Get delay.
+	shift
+	DELAY="${1}"
+	if [ "${DELAY}" = "" ]
+	then
+		DELAY=1
+	else
+		DELAY="${1}"
+		shift
+	fi
+	while true
+	do
+		sleep $DELAY
+		TEMP="`sysctl hw.sensors.acpitz0.temp0 | sed 's/^.*=//; s/ .*$//'`"
+		USER="`top -1 -d 1 | grep CPUs | awk ' { print $3 } '`"
+		echo "${TEMP}C ${USER}"
+	done
+	;;
+esac
+
+# Finish.
+exit $SUCCESS
+
