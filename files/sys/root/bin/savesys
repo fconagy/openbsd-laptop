@@ -82,7 +82,7 @@ cleanup() {
 }
 
 # Set up trap.
-trap 'echo "Canceled, cleaning up"; cleanup; exit 1' 1 2 3 15
+trap 'echo "Canceled, state might be inconsistent, cleaning up"; cleanup; exit 1' 1 2 3 15
 
 # Debug.
 #E="echo"
@@ -120,7 +120,7 @@ do
 		# Check.
 		shift
 		CHECK=yes
-		VERBOSE=yes
+		#VERBOSE=yes
 		SWITCHES="$SWITCHES -c"
 		;;
 	-l|--list|-list|list)
@@ -478,7 +478,7 @@ copycheck() {
 			then
 
 				# File excluded.
-				if [ $VERBOSE = yes ]
+				if [ $VERBOSE = yes -o $CHECK = yes ]
 				then
 					echo "$1 excluded"
 					touch $XC
@@ -570,7 +570,10 @@ savefile() {
 				# Check only.
 				if diff $TBS $TBSD/$NAME >/dev/null
 				then
-					echo "$TBS saved-already"
+					if [ $VERBOSE = yes ]
+					then
+						echo "$TBS saved-already"
+					fi
 				else
 					echo "$TBS differs"
 				fi
@@ -706,7 +709,7 @@ save() {
 				then
 
 					# Directory excluded. Do not exclude file by file.
-					if [ $VERBOSE = yes ]
+					if [ $VERBOSE = yes -o $CHECK = yes ]
 					then
 						echo "$1 directory-excluded"
 						touch $XC

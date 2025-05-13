@@ -53,7 +53,7 @@ chown -R $USR $SDIR
 chgrp -R $GRP $SDIR
 
 # Push to git servers.
-#/usr/bin/su - $USR -c "cd $SDIR && ssh-git && ./git-push.sh $COMMIT"
+/usr/bin/su - $USR -c "cd $LDIR && ssh-git ./git-push.sh $COMMIT; sleep 10"
 
 # Finish.
 exit 0
