@@ -9,12 +9,14 @@ set -e
 CMSG="$*"
 if [ "$CMSG" = "" ]
 then
-	echo "Specify commit message on the command line"
-	exit 1
-fi
 
-# File in git repo.
-git commit -a -m "$CMSG"
+	# Don't commit.
+	:
+else
+
+	# File in git repo.
+	git commit -a -m "$CMSG"
+fi
 
 # Push.
 git push

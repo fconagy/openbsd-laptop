@@ -51,7 +51,7 @@
 100755 -rwxr-xr-x fconagy  users    2024-03-19T13:33:23 /root/bin/mod-patch
 100755 -rwxr-xr-x fconagy  users    2024-03-15T17:11:14 /root/bin/findexe
 100755 -rwxr-xr-x fconagy  users    2024-04-04T13:29:58 /root/bin/iflist
-100755 -rwxr-xr-x fconagy  users    2025-05-13T15:40:23 /root/bin/savesys
+100755 -rwxr-xr-x fconagy  users    2025-05-13T16:06:35 /root/bin/savesys
 100755 -rwxr-xr-x fconagy  users    2024-03-22T11:40:26 /root/bin/findorig
 100755 -rwxr-xr-x fconagy  users    2024-04-05T13:47:17 /root/bin/sdf
 100755 -rwxr-xr-x fconagy  users    2024-04-16T12:19:55 /root/bin/signs
@@ -370,8 +370,8 @@
 100755 -rwxr-xr-x fconagy  users    2025-04-18T13:54:47 /root/scripts/openbsd-stick-msdos.sh
 100644 -rw-r--r-- fconagy  users    2025-04-18T14:00:25 /root/scripts/openbsd-stick-msdos-aslsongs.log
 100644 -rw-r--r-- fconagy  users    2025-04-18T13:40:57 /root/scripts/openbsd-stick-msdos-camera1.log
-100755 -rwxr-xr-x fconagy  users    2025-05-13T15:40:42 /root/scripts/openbsd-laptop-update.sh
-100644 -rw-r--r-- fconagy  users    2025-05-13T15:44:31 /root/scripts/openbsd-laptop-update.log
+100755 -rwxr-xr-x fconagy  users    2025-05-13T16:14:39 /root/scripts/openbsd-laptop-update.sh
+100644 -rw-r--r-- fconagy  users    2025-05-13T16:07:11 /root/scripts/openbsd-laptop-update.log
 100644 -rw-r--r-- fconagy  users    2025-04-04T09:32:59 /root/src/qrandom/Makefile
 100644 -rw-r--r-- fconagy  users    2025-03-25T14:36:45 /root/src/qrandom/qrandom.c
 100755 -rwxr-xr-x fconagy  users    2024-05-17T08:14:51 /root/src/qrandom/include/qusb.h
@@ -433,4 +433,4 @@
 100644 -rw-r--r-- fconagy  users    2024-10-25T11:58:28 /root/src/disknuke/disknuke.c
 100644 -rw-r--r-- fconagy  users    2024-10-25T11:59:27 /root/src/disknuke/Makefile
 100644 -rw-r--r-- fconagy  users    2025-05-13T15:33:48 /root/.gitignore
-100644 -rw-r--r-- fconagy  users    2025-05-13T15:56:42 /savesys.list
+100644 -rw-r--r-- fconagy  users    2025-05-13T19:56:51 /savesys.list

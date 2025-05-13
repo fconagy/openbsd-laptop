@@ -32,7 +32,12 @@ COMMIT="$*"
 echo "Files directory: $SDIR"
 echo "User: $USR"
 echo "Group: $GRP"
-echo "Commit message: $COMMIT"
+if [ "$COMMIT" = "" ]
+then
+	echo "Will not commit"
+else
+	echo "Commit message: $COMMIT"
+fi
 echo -n "Continue [y/N]: "
 read ANS
 case $ANS in
@@ -48,12 +53,22 @@ esac
 set -e
 
 # Save and set ownership.
-savesys -v -o -d $SDIR | tee $LOG
+echo "Save system files"
+savesys -o -d $SDIR | tee $LOG
+echo "Fix ownership"
 chown -R $USR $SDIR
 chgrp -R $GRP $SDIR
 
 # Push to git servers.
-/usr/bin/su - $USR -c "cd $LDIR && ssh-git ./git-push.sh $COMMIT; sleep 10"
+echo "Push to git servers"
+if [ "$COMMIT" = "" ]
+then
+
+	# Don't commit.
+	/usr/bin/su - $USR -c "cd $LDIR && ssh-git ./git-push.sh; echo 'Waiting'; sleep 10"
+else
+	/usr/bin/su - $USR -c "cd $LDIR && ssh-git ./git-push.sh $COMMIT; echo 'Waiting'; sleep 10"
+fi
 
 # Finish.
 exit 0

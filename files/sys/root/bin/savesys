@@ -477,23 +477,25 @@ copycheck() {
 			if echo "${1}" | egrep -e "^${EXPAT}\$" >/dev/null
 			then
 
-				# File excluded.
+				# Report that file excluded.
 				if [ $VERBOSE = yes -o $CHECK = yes ]
 				then
 					echo "$1 excluded"
-					touch $XC
-					break
 				fi
+
+				# Excluded, skip.
+				touch $XC
+				break
 			else
 
-				# Not this pattern.
+				# Not this pattern. No action.
 				:
 			fi
 		done
 		if [ ! -e $XC ]
 		then
 
-			# There is an exclude but no match.
+			# There is an exclude but it was no match.
 			if [ $CHECK = no ]
 			then
 
@@ -709,12 +711,15 @@ save() {
 				then
 
 					# Directory excluded. Do not exclude file by file.
+					# Report.
 					if [ $VERBOSE = yes -o $CHECK = yes ]
 					then
 						echo "$1 directory-excluded"
-						touch $XC
-						break
 					fi
+
+					# Excluded.
+					touch $XC
+					break
 				else
 
 					# Not this pattern.
