@@ -21,6 +21,9 @@ then
 	exit 1
 fi
 
+# New files.
+NEWFILES=$HOME/openbsd-laptop-update.newfiles
+
 # User and group.
 USR=fconagy
 GRP=users
@@ -52,12 +55,29 @@ esac
 # Quit on error.
 set -e
 
+# Get list of new files.
+echo "Get list of new files"
+savesys -N -d $SDIR >$NEWFILES
+
 # Save and set ownership.
 echo "Save system files"
 savesys -o -d $SDIR | tee $LOG
 echo "Fix ownership"
 chown -R $USR $SDIR
 chgrp -R $GRP $SDIR
+
+# Add new files.
+echo "Add new files"
+cat $NEWFILES | sed 's/^\///' | while read F REST
+do
+	echo "$F"
+	/usr/bin/su - $USR -c "cd $SDIR/sys && git add $F"
+	if [ $? -ne 0 ]
+	then
+		echo "There was an error adding $F"
+		exit 1
+	fi
+done
 
 # Push to git servers.
 echo "Push to git servers"

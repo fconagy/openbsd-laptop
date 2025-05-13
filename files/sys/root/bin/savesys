@@ -47,8 +47,6 @@ where
     -m          Use the list of mod-ded file names and save all of
                 them as they are in current state.
                 Switch -d needs to be also specified.
-    -M          report files which are present in the save directory tree but
-                missing from the system.
     -I file     Use a list of file names to be saved.
                 A file with lines specifying files or directories, one per line.
                 Pathnames should be absolute.
@@ -64,7 +62,9 @@ where
                 file name, from line start to line end.
                 Will use \$HOME/savesys.exc if exists.
     -x          Ignore the default savesys.exc if there is one.
-    -M          List files saved but missing from the system.
+    -M          report files which are present in the save directory tree but
+                missing from the system.
+    -N          List files in the system but not saved.
 The default save directory root is $HOME/save/<hostname>/sys.
 The default include and exclude files are picked up from \$HOME.
 It will be created when -d is not specified. Otherwise is has to be created
@@ -112,6 +112,7 @@ IGNOREI=no
 IGNOREX=no
 MISSING=no
 REMOVE=no
+NOTSAVED=no
 while [ "$1" != "" ]
 do
 	case "$1" in
@@ -245,6 +246,11 @@ do
 		REMOVE=yes
 		shift
 		SWITCHES="$SWITCHES -r"
+		;;
+	-N|--not-saved|-not-saved)
+		NOTSAVED=yes
+		shift
+		SWITCHES="$SWITCHES -N"
 		;;
 	-*)
 		echo "Unknown switch $1"
@@ -512,7 +518,11 @@ copycheck() {
 			else
 
 				# Just check.
-				echo "$1 -> $2"
+				if [ $VERBOSE = yes ]
+				then
+					echo "$1 -> $2"
+				fi
+				echo "$1 $STATE"
 			fi
 		fi
 	else
@@ -532,7 +542,11 @@ copycheck() {
 		else
 
 			# Just check.
-			echo "$1 -> $2"
+			if [ $VERBOSE = yes ]
+			then
+				echo "$1 -> $2"
+			fi
+			echo "$1 $STATE"
 		fi
 	fi
 	return 0
@@ -642,7 +656,7 @@ savefile() {
 	else
 
 		# New file, no saved copy.
-		copycheck new-saved $TBS $TBSD
+		copycheck newfile-saved $TBS $TBSD
 		if [ $? -ne 0 ]
 		then
 			return $FAILURE
@@ -919,6 +933,24 @@ then
 	then
 		exit $FAILURE
 	fi
+elif [ $NOTSAVED = yes ]
+then
+
+	# Report files which are in the system but not
+    # saved under the save directory tree.
+
+	# Call back. Remove switch -N so as not to cycle.
+	# Note that env var SWITCHES has leading space removed.
+	SWITCHES="`echo \"$SWITCHES\" | sed 's/\-N//'`"
+	$0 -c $SWITCHES $ARG | grep ' newfile-saved' | awk ' { print $1 } ' | \
+		while read F REST
+	do
+		if [ ! -r $F ]
+		then
+			echo "Cannot find $F"
+			exit $FAILURE
+		fi
+	done
 elif [ $MOD = yes ]
 then
 
@@ -965,9 +997,13 @@ then
 	fi
 
 	# We are cool.
-	if [ $VERBOSE = yes ]
+	if [ $CHECK != yes ]
 	then
-		echo "Updating list file $SAVELIST"
+		if [ $VERBOSE = yes ]
+		then
+			echo "Updating list file $SAVELIST"
+		fi
+		savelist
 	fi
 	savelist
 elif [ "$FILELIST" != "" ]
@@ -1066,11 +1102,14 @@ then
 	fi
 
 	# We are cool.
-	if [ $VERBOSE = yes ]
+	if [ $CHECK != yes ]
 	then
-		echo "Updating list file $SAVELIST"
+		if [ $VERBOSE = yes ]
+		then
+			echo "Updating list file $SAVELIST"
+		fi
+		savelist
 	fi
-	savelist
 else
 
 	# Got arguments. File or directory.
@@ -1092,7 +1131,14 @@ else
 	then
 		echo "Updating list file $SAVELIST"
 	fi
-	savelist
+	if [ $CHECK != yes ]
+	then
+		if [ $VERBOSE = yes ]
+		then
+			echo "Updating list file $SAVELIST"
+		fi
+		savelist
+	fi
 fi
 
 # Finish.
