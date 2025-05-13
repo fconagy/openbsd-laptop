@@ -10,3 +10,6 @@ On the local machine with MkDocsto click on
 When viewing on the GitHub web site click on
 [Documentation](https://github.com/fconagy/openbsd-laptop/blob/main/docs/index.md).
 
+The `files` subdirectory contains instrumentation / scripts used for the build.
+Subdirectory `docs` is the documentation.
+
