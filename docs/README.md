@@ -1,5 +1,4 @@
-# Documentation
+## Documentation
 
-This directory contains the build log and other
-documentation files.
+This directory contains the build log and other files / tools.
 
