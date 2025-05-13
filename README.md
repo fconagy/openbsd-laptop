@@ -1,8 +1,8 @@
-## Openbsd laptop
+# Openbsd laptop
 
 Documentation and tools used to build an OpenBSD laptop.
 
-## Build
+# Build
 
 On the local machine with MkDocsto click on
 [Building an OpenBSD laptop](http://127.0.0.1:8000/openbsd-laptop-build/).

@@ -1,5 +1,5 @@
 
-## Build
+# Build
 
 This is the documentation for building an OpenBSD laptop.
 
