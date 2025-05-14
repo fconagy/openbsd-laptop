@@ -942,15 +942,29 @@ then
 	# Call back. Remove switch -N so as not to cycle.
 	# Note that env var SWITCHES has leading space removed.
 	SWITCHES="`echo \"$SWITCHES\" | sed 's/\-N//'`"
-	$0 -c $SWITCHES $ARG | grep ' newfile-saved' | awk ' { print $1 } ' | \
+	rm -f $BAILOUT
+	$0 -c $SWITCHES $ARG | egrep -e ' newfile-saved$' | awk ' { print $1 } ' | \
 		while read F REST
 	do
+
+		# New files being reported.
 		if [ ! -r $F ]
 		then
-			echo "Cannot find $F"
-			exit $FAILURE
+
+			# No file, quit.
+			echo "Cannot find $F - confused"
+			touch $BAILOUT
+			return
+		else
+
+			# Just print file name.
+			echo $F
 		fi
 	done
+	if [ -r $BAILOUT ]
+	then
+		exit $FAILURE
+	fi
 elif [ $MOD = yes ]
 then
 

@@ -1,11 +1,14 @@
 #!/bin/sh
 
+set -x
+
 # Update files under the openbsd-laptop git.
 
 # Log file.
 LOG=openbsd-laptop-update.log
 
 # Openbsd laptop documentation directory.
+# This is the top of the git.
 LDIR=/h/users/fconagy/openbsd-laptop
 if [ ! -d $LDIR ]
 then
@@ -37,7 +40,7 @@ echo "User: $USR"
 echo "Group: $GRP"
 if [ "$COMMIT" = "" ]
 then
-	echo "Will not commit"
+	echo "Commit message: Will not commit"
 else
 	echo "Commit message: $COMMIT"
 fi
