@@ -1,0 +1,22 @@
+! OpenBSD xenodm config file.
+!
+DisplayManager.authDir:	/etc/X11/xenodm
+DisplayManager.errorLogFile:	/var/log/xenodm.log
+DisplayManager.servers:		/etc/X11/xenodm/Xservers
+DisplayManager*resources:	/etc/X11/xenodm/Xresources
+DisplayManager*authorize:	true
+DisplayManager*authComplain:	true
+!
+DisplayManager*startup:		/etc/X11/xenodm/Xstartup
+DisplayManager*session:		/etc/X11/xenodm/Xsession
+DisplayManager*reset:		/etc/X11/xenodm/Xreset
+! The following three resources set up display :0 as the console.
+DisplayManager._0.setup:	/etc/X11/xenodm/Xsetup_0
+DisplayManager._0.startup:	/etc/X11/xenodm/GiveConsole
+DisplayManager._0.reset:	/etc/X11/xenodm/TakeConsole
+! Restart when finished. Otherwise after the session finishes
+! for unkown reason the DPI will change and the login window
+! will be larger than usual.
+DisplayManager._0.terminateServer:	true
+
+DisplayManager.*.authName:	MIT-MAGIC-COOKIE-1

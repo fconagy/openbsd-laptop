@@ -1,0 +1,116 @@
+#!/bin/sh
+
+# Local startup script.
+
+# Redirect output.
+exec >/var/log/local.log 2>&1
+
+# Mark start.
+echo ""
+echo "Executing local startup procedures..."
+
+# Add more virtual console terminals.
+echo "Add virtual consoles"
+for I in 6 7 8 9 10 11
+do
+	wsconscfg -e vt100 $I
+done
+
+# Create device file for mix rng.
+echo "Device file mixrng"
+RDEV=/dev/mixrng
+MAJOR=102
+if [ ! -c $RDEV ]
+then
+
+	# Not there create it.
+	mknod $RDEV c $MAJOR 0
+else
+
+	# Exists, fix when the current major is not
+	# what is requested.
+	CMAJOR="`stat -f '%Hr' $RDEV`"
+	if [ "$CMAJOR" != "" ]
+	then
+		if [ $CMAJOR -ne $MAJOR ]
+		then
+			echo "Fixing major $MAJOR"
+			rm $RDEV && mknod $RDEV c $MAJOR 0
+		else
+			echo "Problem defining device file"
+		fi
+	fi
+fi
+if [ -e $RDEV ]
+then
+	chmod og-rwx $RDEV
+else
+	echo "No $RDEV - confused"
+fi
+
+# In case it was forgotten.
+echo "Remove setuid bits"
+if [ -r /root/etc/setuids.conf ]
+then
+	/root/bin/setuids disable
+fi
+
+# Shields up.
+echo "Disconnecting"
+/root/bin/disconnect -a
+
+# Set time disabled. No network at boot time.
+#echo "Set time with ntpdate"
+#ntpdate -4 -b se.pool.ntp.org
+
+# Start mouse, right button pastes.
+# This conflicts with X. Start manually when needed.
+#echo "Start mouse daemon"
+#wsmoused -M 2=3 -M 3=2
+# Try to make mouse slower.
+#wsconsctl mouse.param=0:770,1:600
+#wsconsctl mouse2.param=0:401,1:401
+
+# Sysctl.
+sysctl kern.maxfiles=20000
+sysctl machdep.lidaction=0
+
+# Set numlock on. Set keyboard repeat rate. Slow.
+if [ -x /root/bin/hw ]
+then
+
+	# This needs to happen after the graphics card
+	# initialization for X.
+	(sleep 10; /root/bin/hw ledstate 2; ) &
+
+	echo "Keyboard repeat rate"
+	/root/bin/hw repeat 25
+
+	echo "Tone down CPU to ease cooling"
+	/root/bin/hw cpu slow
+fi
+
+# Print on the local printer.
+if [ -x /root/bin/printd ]
+then
+	/root/bin/printd
+fi
+
+# Start display manager here instead of 'rcctl enable xenodm'.
+# Set short host name accessible for xenodm startup.
+# The local.def file will be included in Xresources.
+# Should be the last one.
+echo "Start xenodm"
+HOSTNAME="`hostname | awk -F '.' ' { print $1 } '`"
+if [ "$HOSTNAME" != "" ]
+then
+	echo "#define SHORTHOST $HOSTNAME" >/etc/X11/xenodm/local.def
+else
+	echo "#define SHORTHOST localhost" >/etc/X11/xenodm/local.def
+fi
+/usr/X11R6/bin/xenodm
+
+# Finish.
+echo "Finished"
+exit 0
+

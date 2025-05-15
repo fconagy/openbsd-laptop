@@ -1,0 +1,16 @@
+# Hosts file.
+
+127.0.0.1	localhost
+
+# Got no IPV6.
+#::1		localhost
+
+# Note that network names are ignored in netstat -r output.
+127.0.0.0		local
+192.168.1.1		gw
+192.168.1.0		lan
+192.168.1.255	lanbro
+192.168.0.1		gw2
+192.168.0.0		lan2
+192.168.0.255	lan2bro
+

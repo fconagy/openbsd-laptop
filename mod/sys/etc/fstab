@@ -1,0 +1,5 @@
+fe685e2bd3618201.b none swap sw
+fe685e2bd3618201.a / ffs rw 1 1
+fe685e2bd3618201.d /tmp ffs rw,nodev,nosuid 1 2
+fe685e2bd3618201.f /usr ffs rw,wxallowed,nodev 1 2
+fe685e2bd3618201.e /var ffs rw,nodev,nosuid 1 2

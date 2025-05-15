@@ -1,0 +1,185 @@
+! Xresources file for xenodm on miletus.
+
+! Local definitions.
+#include "/etc/X11/xenodm/local.def"
+
+! Keys. Took off safe session.
+xlogin*login.translations: #override \
+	<Key>Delete: delete-character()\n\
+	<Key>Left: move-backward-character()\n\
+	<Key>Right: move-forward-character()\n\
+	<Key>Home: move-to-begining()\n\
+	<Key>End: move-to-end()\n\
+	Ctrl<Key>U: erase-line()\n\
+	Ctrl<Key>C: erase-line()\n\
+	Ctrl<Key>\: erase-line()\n\
+	Ctrl<Key>plus: erase-line()\n\
+	Ctrl<Key>KP_Enter: finish-field()\n\
+	Ctrl<Key>Return: finish-field()\n\
+	<Key>KP_Enter: finish-field()\n\
+	<Key>Return: finish-field()
+
+! Login window settings.
+!xlogin*greeting: Welcome to CLIENTHOST
+xlogin*greeting: Welcome to SHORTHOST
+xlogin*namePrompt: Username:\040\040\040
+xlogin*passwdPrompt: Password:\040\040\040
+xlogin*echoPasswd: true
+xlogin*echoPasswdChar: \040
+xlogin*allowRootLogin: false
+! This is necessary for fingerprint/other login when
+! there is a password field expect input but has no function.
+! If nothing is typed for the password login will be denied.
+xlogin*allowNullPasswd: true
+xlogin*fail: Login incorrect
+
+! Login window size and position for various resolutions.
+! We got issues with virtual screen whereas he thinks
+! he puts it in the center of the screen but it is actually off right.
+! So this is a workaround.
+! There is serious funky-ness with the fonts. Some perfectly
+! legal font names ignored or replaced with random other fonts.
+! So there is a lot of trial and error involved.
+! Actually all this hard work seems to be ignored by xenodm when
+! using the default kernel mode change driver. The DPI setting is
+! ignored too.
+#if WIDTH > 1920
+! Big screen.
+xlogin*geometry: 800x400+560+340
+xlogin*greetFont: Monospace-24
+xlogin*greetFace: Monospace-24
+xlogin*promptFont: Monospace-18
+xlogin*promptFace: Monospace-18
+xlogin*failFont: Monospace-18
+xlogin*failFace: Monospace-18
+xlogin*font: lucidasans-18
+xlogin*face: lucidasans-18
+xlogin*Font: lucidasans-18
+xlogin*Face: lucidasans-18
+#elif WIDTH == 1920
+! Most frequent screen size.
+! We do xrandr --output default --dpi 96
+! otherwise small fonts come out to be very large
+! for some reason.
+! Can also do 'lucidasans' instead of 'Monospace'.
+! 'Monospace' will interfere with the box drawing
+! when typing inside the username/password box.
+! !!!!
+xlogin*foreground: red
+xlogin*greetColor: red
+xlogin.geometry: 500x260+710+410
+xlogin*greetFont: Monospace-18
+xlogin*greetFace: Monospace-18:bold:italic
+xlogin*promptFont: Monospace-14
+xlogin*promptFace: Monospace-14
+xlogin*failFont: Monospace-14
+xlogin*failFace: Monospace-14
+xlogin*font: lucidasans-12
+xlogin*face: lucidasans-12
+xlogin*Font: lucidasans-12
+xlogin*Face: lucidasans-12
+#elif WIDTH > 1600
+! Medium.
+xlogin*geometry: 500x300+550+450
+xlogin*greetFont: Monospace-14
+xlogin*greetFace: Monospace-14:bold:italic
+xlogin*promptFont: Monospace-12
+xlogin*promptFace: Monospace-12
+xlogin*failFont: Monospace-12
+xlogin*failFace: Monospace-12
+xlogin*font: lucidasans-12
+xlogin*face: lucidasans-12
+xlogin*Font: lucidasans-12
+xlogin*Face: lucidasans-12
+#elif WIDTH > 1440
+! !!!! Smaller screen.
+xlogin*geometry: 500x300+550+450
+xlogin*greetFont: Monospace-12
+xlogin*greetFace: Monospace-12:bold:italic
+xlogin*promptFont: Monospace-10
+xlogin*promptFace: Monospace-10
+xlogin*failFont: Monospace-10
+xlogin*failFace: Monospace-10
+xlogin*font: lucidasans-10
+xlogin*face: lucidasans-10
+xlogin*Font: lucidasans-10
+xlogin*Face: lucidasans-10
+#elif WIDTH > 1024
+! !!!! Even smaller screen.
+xlogin*geometry: 450x250+400+260
+xlogin*greetFont: Monospace-12
+xlogin*greetFace: Monospace-12:bold:italic
+xlogin*promptFont: Monospace-10
+xlogin*promptFace: Monospace-10
+xlogin*failFont: Monospace-10
+xlogin*failFace: Monospace-10
+xlogin*font: lucidasans-10
+xlogin*face: lucidasans-10
+xlogin*Font: lucidasans-10
+xlogin*Face: lucidasans-10
+#else
+! Very small screen.
+xlogin*geometry: 400x250+300+240
+xlogin*greetFont: Monospace-10
+xlogin*greetFace: Monospace-10:bold:italic
+xlogin*promptFont: Monospace-8
+xlogin*promptFace: Monospace-8
+xlogin*failFont: Monospace-8
+xlogin*failFace: Monospace-8
+xlogin*font: lucidasans-8
+xlogin*face: lucidasans-8
+xlogin*Font: lucidasans-8
+xlogin*Face: lucidasans-8
+#endif
+
+! Colors. It is always color these days.
+#ifdef COLOR
+xlogin*borderWidth: 1
+xlogin*frameWidth: 2
+xlogin*innerFramesWidth: 1
+xlogin*sepWidth: 1
+xlogin*shdColor: forestgreen
+xlogin*hiColor: forestgreen
+xlogin*background: #060f08
+xlogin*foreground: green
+! Please note this is undocumented.
+xlogin*inpColor: black
+xlogin*greetColor: green
+xlogin*failColor: red
+*Foreground: green
+*Background: black
+#else
+xlogin*borderWidth: 3
+xlogin*frameWidth: 2
+xlogin*innerFramesWidth: 2
+xlogin*shdColor: black
+xlogin*hiColor: black
+#endif
+
+! No logo.
+#if PLANES >= 8
+!xlogin*logoFileName: /usr/local/lib/X11/xdm/pixmaps/xorg.xpm
+#else
+!xlogin*logoFileName: /usr/local/lib/X11/xdm/pixmaps/xorg-bw.xpm
+#endif
+xlogin*useShape: true
+xlogin*logoPadding: 10
+
+! This is disabled.
+XConsole.text.geometry:	480x130
+XConsole.verbose:	true
+XConsole*iconic:	true
+XConsole*font:		fixed
+XConsole*foreground:	green
+XConsole*background:	black
+XConsole*borderWidth:	3
+
+! This is disabled.
+Chooser*geometry:		700x500+300+200
+Chooser*allowShellResize:	false
+Chooser*viewport.forceBars:	true
+Chooser*label.font:		*-new century schoolbook-bold-i-normal-*-240-*
+Chooser*label.label:		XDMCP Host Menu from CLIENTHOST
+Chooser*list.font:		-*-*-medium-r-normal-*-*-230-*-*-c-*-iso8859-1
+Chooser*Command.font:		*-new century schoolbook-bold-r-normal-*-180-*
+

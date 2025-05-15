@@ -1,0 +1,228 @@
+#!/bin/sh
+
+# External monitor setup.
+# Xdm is having issues.
+
+# Arguments.
+CMD="$1"
+OFF=no
+ON=no
+case $CMD in
+off)
+	OFF=yes
+	shift
+	;;
+on)
+	ON=yes
+	shift
+	;;
+"")
+	;;
+*)
+	echo "Wrong argument $1"
+	exit 1
+	;;
+esac
+
+# Log file. This should be cleaned up from /etc/rc.local.
+case `id -u` in
+0)
+	LOG=/var/log/x-displays.log
+	;;
+*)
+	LOG=$HOME/x-displays.log
+	;;
+esac
+echo "" >$LOG
+
+# List of connected screens.
+XRANDR=x-displays.xrandr
+
+# Magic. Is not used any more.
+MAGIC=no
+
+# Default DPI value for large monitors. Appearantly this
+# works with the X11 intel driver but ignored by the modesetting.
+# This and also what's in Xresources for xenodm will be ignored.
+#DPI="--dpi 96"
+DPI=""
+
+# Make sure path is right.
+PATH=$PATH:/usr/local/bin
+export PATH
+
+# Get info from xrandr.
+echo "==== At `date` started running xrandr"  >>$LOG 2>&1
+xrandr >$XRANDR 2>&1
+if [ $? -ne 0 ]
+then
+	echo "==== Error running xrandr" >>$LOG 2>&1
+	cat $XRANDR >>$LOG 2>&1
+	exit 1
+fi
+echo "==== At `date` finished running xrandr"  >>$LOG 2>&1
+
+# Show connected screens.
+echo "==== Connected screens" >>$LOG
+cat $XRANDR | grep ' connected ' >>$LOG
+
+# First and second HDMI screens.
+SCREEN1="`cat $XRANDR | grep ' connected ' | grep HDMI | awk ' { print $1 } ' | sort | head -1`"
+SCREEN2="`cat $XRANDR | grep ' connected ' | grep HDMI | awk ' { print $1 } ' | sort | tail -1`"
+echo "==== HDMI screens: $SCREEN1 $SCREEN2" >>$LOG
+
+# External port replicator screen. The laptop screen is eDP1 or eDP-1.
+EXT="`cat $XRANDR | grep ' connected ' | egrep 'DP1|DP-1' | egrep -v 'eDP1|eDP-1' | awk ' { print $1 } '`"
+echo "==== Port replicator screens: $EXT" >>$LOG
+
+# VGA connector on the laptop. (Legacy.)
+VGA="`cat $XRANDR | grep ' connected ' | grep VGA | awk ' { print $1 } '`"
+echo "==== VGA screens: $VGA" >>$LOG
+
+# Laptop screen list.
+LAP="`cat $XRANDR | grep ' connected ' | awk ' { print $1 } ' | egrep -e 'eDP1|eDP-1|LVDS-1'`"
+echo "==== Laptop screens: $LAP" >>$LOG
+
+# Assemble screen list.
+if [ "$SCREEN1" != "" ]
+then
+	if [ "$SCREEN1" != "$SCREEN2" ]
+	then
+		SCREENS="$SCREEN1 $SCREEN2 $EXT $VGA $LAP"
+	else
+		SCREENS="$SCREEN1 $EXT $VGA $LAP"
+	fi
+else
+	SCREENS="$EXT $VGA $LAP"
+fi
+echo "==== Screen list: $SCREENS" >>$LOG
+
+# Screens off.
+echo "==== All screens off" >>$LOG
+XOPT=""
+for S in $SCREENS
+do
+	XOPT="$XOPT --output $S --off"
+done
+echo "==== `date` Executing xrandr $XOPT" >>$LOG
+xrandr $XOPT >>$LOG 2>&1
+echo "==== All screens should be off" >>$LOG
+
+# The screens just wanted to be off so we stop here.
+if [ "$CMD" = "off" ]
+then
+	rm -f $XRANDR
+	exit 0
+fi
+
+# Multihead setup. We assemble the command line
+# options for xrandr so it will be called just once.
+# Speeds up the process.
+XOPTS=""
+if [ "$SCREEN1" != "" ]
+then
+
+	# At least one HDMI screen.
+	if [ "$SCREEN2" != "" ]
+	then
+
+		# We got two HDMI screens connected.
+		# Would not work with three. :)
+		if [ "$SCREEN1" != "$SCREEN2" ]
+		then
+			echo "==== Two HDMI screens $SCREEN1 $SCREEN2" >>$LOG 2>&1
+			echo "==== Setting up first screen" >>$LOG 2>&1
+			XOPTS="$XOPTS --output $SCREEN1 $DPI --auto --primary"
+		else
+
+			# One HDMI screen.
+			echo "==== One HDMI screen $SCREEN1" >>$LOG 2>&1
+			case `hostname | awk -F'.' ' { print $1 } '` in
+			naxos)
+
+				# On naxos the HDMI screen is the secondary.
+				# The first one is DP-1/DP1, non-HDMI. That is $EXT.
+				# The second one is HDMI-2/HDMI2. That is $SCREEN1.
+				echo "==== This is naxos with a special setup" >>$LOG 2>&1
+				if [ "$EXT" != "" ]
+				then
+
+					# This is handled at the generic case down below.
+					echo "==== $EXT primary screen on port replicator" >>$LOG 2>&1
+					#XOPTS="$XOPTS --output $EXT $DPI --auto --primary"
+
+					# And the HDMI screen in this case is the secondary.
+					# Stays off not to show login window.
+					echo "==== $SCREEN1 secondary screen" >>$LOG 2>&1
+					if [ $ON = yes ]
+					then
+						XOPTS="$XOPTS --output $SCREEN1 $DPI --auto"
+					fi
+				else
+
+					# Only HDMI screen, this is the primary then.
+					echo "==== $SCREEN1 the only one" >>$LOG 2>&1
+					XOPTS="$XOPTS --output $SCREEN1 $DPI --auto --primary"
+				fi
+				;;
+			*)
+
+				# On the Dells.
+				echo "==== Setting up $SCREEN1" >>$LOG 2>&1
+				XOPTS="$XOPTS --output $SCREEN1 $DPI --auto --primary"
+				;;
+			esac
+		fi
+	else
+		echo "==== Getting confused about screens." >>$LOG 2>&1
+	fi
+
+	# We got this one for the special cases (naxos) as well.
+	if [ "$EXT" != "" ]
+	then
+		echo "==== Setting up $EXT - generic case" >>$LOG 2>&1
+		XOPTS="$XOPTS --output $EXT $DPI --auto --primary"
+	fi
+else
+
+	# No HDMI displays.
+	# Check for external laptop monitor.
+	if [ "$EXT" != "" ]
+	then
+
+		# Other external screen.
+		echo "==== Setting up external monitor $EXT as primary" >>$LOG 2>&1
+		XOPTS="$XOPTS --output $EXT $DPI --auto  --primary"
+	elif [ "$VGA" != "" ]
+	then
+
+		# VGA screen.
+		echo "==== Setting up VGA monitor as primary" >>$LOG 2>&1
+		XOPTS="$XOPTS --output $VGA --auto  --primary"
+	else
+
+		# Don't do anything then.
+		echo "==== Laptop screen only" >>$LOG 2>&1
+		for L in $LAP
+		do
+			echo "==== Laptop screen $L" >>$LOG 2>&1
+			XOPTS="$XOPTS --output $L $DPI --auto --primary --orientation normal"
+		done
+	fi
+fi
+
+# Do it.
+echo "==== `date` Executing xrandr $XOPTS" >>$LOG 2>&1
+xrandr $XOPTS
+
+# Important to set DPI otherwise it will use outsized fonts, for some reason.
+
+# Finish.
+echo "==== Command xrandr output" >>$LOG 2>&1
+cat $XRANDR >>$LOG 2>&1
+#xdpyinfo >>$LOG 2>&1
+#xlsfonts >>$LOG 2>&1
+rm -f $XRANDR
+echo "==== At `date` finished" >>$LOG 2>&1
+exit 0
+

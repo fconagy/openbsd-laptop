@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Assign ownership of the console to the invoking user
+#
+# By convention, both xconsole and xterm -C check that the
+# console is owned by the invoking user and is readable before attaching
+# the console output.  This way a random user can invoke xterm -C without
+# causing serious grief.
+#
+prefix="/usr/X11R6"
+exec_prefix="${prefix}"
+
+# Also group.
+GROUP="`id -g $USER`"
+
+# !!!! The console is already silenced.
+#chown $USER /dev/console
+
+# Change ownership for X11 device files.
+# Note that there is no drm0 or drmR128 any more.
+for DEV in /dev/dri/card0 /dev/dri/renderD128
+do
+	if [ -c $DEV ]
+	then
+		chown $USER:$GROUP $DEV
+	fi
+done
+
+# Register.
+${exec_prefix}/bin/sessreg -a -l $DISPLAY -u none $USER
+
+# !!!! The mouse daemon is not compatible with X.
+PID="`ps -axu | grep wsmoused | grep -v grep | awk ' { print $2 } '`"
+if [ "$PID" != "" ]
+then
+	kill $PID
+fi
+

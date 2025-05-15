@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Shutdown script.
+
+# The Asus laptop when the keyboard is connected via the
+# port replicator leaves the numlock on when being shut down.
+# Switch it off.
+if [ -x /root/bin/hw ]
+then
+	/root/bin/hw ledstate 0 >/dev/null 2>&1
+fi
+
+# Finish.
+exit 0
+

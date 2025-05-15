@@ -1,0 +1,9 @@
+#sndiod_flags="-f rsnd/0 -F rsnd/1"
+dhcpleased_flags=NO
+ntpd_flags=NO
+pkg_scripts=pcscd
+resolvd_flags=NO
+slaacd_flags=NO
+smtpd_flags=NO
+sndiod_flags="-f rsnd/0 -F rsnd/1 -F rsnd/2"
+sshd_flags=NO
