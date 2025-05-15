@@ -12,4 +12,5 @@ When viewing on the GitHub web site click on
 
 The `files` subdirectory contains instrumentation / scripts used for the build.
 Subdirectory `docs` is the documentation.
+Subdirectory `mod` contains the copy of the modified system files.
 
